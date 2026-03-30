@@ -16,6 +16,7 @@ ENV/
 .env
 .env.local
 .env.*.local
+config.toml
 secrets/
 
 # Logs and runtime data
