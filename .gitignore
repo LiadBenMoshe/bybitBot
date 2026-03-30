@@ -16,6 +16,7 @@ ENV/
 .env
 .env.local
 .env.*.local
+secrets/
 
 # Logs and runtime data
 logs/

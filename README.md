@@ -53,6 +53,34 @@ Key tuning values:
 streamlit run main.py
 ```
 
+## Streamlit Auth
+
+This app now supports a simple built-in login flow with role-based permissions and Google Authenticator TOTP.
+
+Configure these values in `.env`:
+
+- `AUTH_ENABLED=true`
+- `AUTH_USERS_FILE=secrets/auth_users.json`
+- `AUTH_SESSION_MINUTES=480`
+- `AUTH_TOTP_ISSUER=Bybit Trading Bot`
+
+First-time setup:
+
+1. Start the app with `AUTH_ENABLED=true`.
+2. If no users exist yet, the app shows a bootstrap screen.
+3. Create the first admin user.
+4. Scan the generated QR code with Google Authenticator.
+5. Log in with username, password, and the 6-digit TOTP code.
+
+Built-in roles:
+
+- `viewer` - can view the dashboard
+- `analyst` - can view the dashboard and run backtests
+- `operator` - can view, run backtests, and start or stop the bot
+- `admin` - same runtime permissions as operator, intended for full control
+
+Auth audit logs are written to `logs/auth_audit.jsonl` by default.
+
 ## Logs
 
 - Trade history: `logs/trades.jsonl`

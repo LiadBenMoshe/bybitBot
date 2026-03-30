@@ -35,6 +35,11 @@ class Settings:
     event_log_file: str = field(default_factory=lambda: os.getenv("EVENT_LOG_FILE", "bot.log"))
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    auth_enabled: bool = field(default_factory=lambda: os.getenv("AUTH_ENABLED", "false").lower() == "true")
+    auth_users_file: Path = field(default_factory=lambda: Path(os.getenv("AUTH_USERS_FILE", "secrets/auth_users.json")))
+    auth_session_minutes: int = field(default_factory=lambda: int(os.getenv("AUTH_SESSION_MINUTES", "480")))
+    auth_totp_issuer: str = field(default_factory=lambda: os.getenv("AUTH_TOTP_ISSUER", "Bybit Trading Bot"))
+    auth_audit_log_file: str = field(default_factory=lambda: os.getenv("AUTH_AUDIT_LOG_FILE", "auth_audit.jsonl"))
     ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "12")))
     ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "26")))
     rsi_period: int = field(default_factory=lambda: int(os.getenv("RSI_PERIOD", "14")))
@@ -69,6 +74,10 @@ class Settings:
     def event_log_path(self) -> Path:
         return self.log_dir / self.event_log_file
 
+    @property
+    def auth_audit_log_path(self) -> Path:
+        return self.log_dir / self.auth_audit_log_file
+
     def validate(self) -> None:
         if not self.paper_trading and (not self.api_key or not self.api_secret):
             raise ValueError("BYBIT_API_KEY and BYBIT_API_SECRET are required when paper trading is disabled.")
@@ -92,6 +101,8 @@ class Settings:
             raise ValueError("MAX_BACKTEST_DRAWDOWN_PCT must be positive.")
         if self.min_backtest_trades < 0:
             raise ValueError("MIN_BACKTEST_TRADES must be non-negative.")
+        if self.auth_session_minutes <= 0:
+            raise ValueError("AUTH_SESSION_MINUTES must be positive.")
 
 
 def get_settings() -> Settings:
