@@ -21,6 +21,17 @@ def get_backtester() -> Backtester:
     return Backtester(get_settings())
 
 
+def _get_view_mode() -> str:
+    raw_value = st.query_params.get("view", "dashboard")
+    if isinstance(raw_value, list):
+        raw_value = raw_value[0] if raw_value else "dashboard"
+    return "control" if str(raw_value).lower() == "control" else "dashboard"
+
+
+def _set_view_mode(view_mode: str) -> None:
+    st.query_params["view"] = view_mode
+
+
 def _render_stat_card(label: str, value: str, tone: str = "neutral") -> None:
     tones = {
         "green": {"bg": "#000000", "border": "#22c55e", "text": "#4ade80"},
@@ -124,6 +135,28 @@ def render_live_snapshot(engine: TraderEngine) -> None:
     st.caption(f"Last update: {snapshot['last_update']}")
 
 
+@st.fragment(run_every="5s")
+def render_mobile_control_snapshot(engine: TraderEngine) -> None:
+    snapshot = engine.get_snapshot()
+    status_tone = "green" if snapshot["status"] == "Running" else "red"
+    col1, col2 = st.columns(2)
+    with col1:
+        _render_stat_card("Bot Status", snapshot["status"], status_tone)
+    with col2:
+        _render_stat_card("Total PnL", f"{snapshot['total_pnl']:.2f} USDT", _tone_from_pnl(snapshot["total_pnl"]))
+
+    col3, col4 = st.columns(2)
+    with col3:
+        _render_stat_card("Open Positions", str(len(snapshot["open_positions"])))
+    with col4:
+        _render_stat_card("Trades", str(snapshot["trade_count"]))
+
+    if snapshot["last_error"]:
+        st.error(snapshot["last_error"])
+
+    st.caption(f"Last update: {snapshot['last_update']}")
+
+
 def _clear_auth_session() -> None:
     for key in ["auth_username", "auth_role", "auth_expires_at"]:
         st.session_state.pop(key, None)
@@ -212,7 +245,8 @@ def _require_permission(auth_store: AuthStore, user: AuthUser, permission: str, 
 
 def render_dashboard() -> None:
     st.set_page_config(page_title="Bybit Trading Bot", layout="wide")
-    st.title("Bybit Trading Bot Dashboard")
+    view_mode = _get_view_mode()
+    st.title("Bybit Trading Bot Dashboard" if view_mode == "dashboard" else "Bybit Bot Control")
 
     settings = get_settings()
     auth_store = AuthStore(settings)
@@ -231,9 +265,17 @@ def render_dashboard() -> None:
         user = None
 
     engine = get_engine()
-    backtester = get_backtester()
 
     st.sidebar.header("Controls")
+    selected_view = st.sidebar.radio(
+        "View",
+        options=["control", "dashboard"],
+        format_func=lambda item: "Control" if item == "control" else "Dashboard",
+        index=0 if view_mode == "control" else 1,
+    )
+    if selected_view != view_mode:
+        _set_view_mode(selected_view)
+        st.rerun()
     st.sidebar.write(f"Mode: `{'Paper' if settings.paper_trading else 'Live'}`")
     st.sidebar.write(f"Category: `{settings.category}`")
     st.sidebar.write(f"Symbols: `{', '.join(settings.symbols)}`")
@@ -258,36 +300,41 @@ def render_dashboard() -> None:
         _clear_auth_session()
         st.rerun()
     st.sidebar.caption("Edit `.env` to change trading parameters, then restart Streamlit.")
-    render_live_snapshot(engine)
+    if view_mode == "control":
+        render_mobile_control_snapshot(engine)
+        st.info("Tip: bookmark this page on your phone with `?view=control` for a faster remote control screen.")
+    else:
+        render_live_snapshot(engine)
 
-    st.subheader("Quick Backtest")
-    selected_symbol = st.selectbox("Symbol", settings.symbols)
-    can_run_backtest = not user or has_permission(user, "run_backtest")
-    if user and not can_run_backtest:
-        st.caption("Your role does not include backtest execution.")
-    if st.button("Run Backtest", disabled=not can_run_backtest):
-        if user and not _require_permission(auth_store, user, "run_backtest", "Run Backtest"):
-            return
-        result = backtester.run(selected_symbol)
+        st.subheader("Quick Backtest")
+        selected_symbol = st.selectbox("Symbol", settings.symbols)
+        can_run_backtest = not user or has_permission(user, "run_backtest")
+        if user and not can_run_backtest:
+            st.caption("Your role does not include backtest execution.")
+        if st.button("Run Backtest", disabled=not can_run_backtest):
+            if user and not _require_permission(auth_store, user, "run_backtest", "Run Backtest"):
+                return
+            backtester = get_backtester()
+            result = backtester.run(selected_symbol)
+            if user:
+                auth_store.log_event(
+                    "backtest_run",
+                    success=True,
+                    username=user.username,
+                    details={"symbol": selected_symbol},
+                )
+            bt1, bt2, bt3, bt4 = st.columns(4)
+            bt1.metric("Return", f"{result.total_return_pct:.2f}%")
+            bt2.metric("Trades", result.trades)
+            bt3.metric("Win Rate", f"{result.win_rate_pct:.2f}%")
+            bt4.metric("Final Equity", f"{result.final_equity:.2f} USDT")
+            bt5, bt6, bt7 = st.columns(3)
+            bt5.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
+            bt6.metric("Profit Factor", f"{result.profit_factor:.2f}")
+            bt7.metric("Avg Trade", f"{result.avg_trade_pct:.2f}%")
+
         if user:
-            auth_store.log_event(
-                "backtest_run",
-                success=True,
-                username=user.username,
-                details={"symbol": selected_symbol},
-            )
-        bt1, bt2, bt3, bt4 = st.columns(4)
-        bt1.metric("Return", f"{result.total_return_pct:.2f}%")
-        bt2.metric("Trades", result.trades)
-        bt3.metric("Win Rate", f"{result.win_rate_pct:.2f}%")
-        bt4.metric("Final Equity", f"{result.final_equity:.2f} USDT")
-        bt5, bt6, bt7 = st.columns(3)
-        bt5.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
-        bt6.metric("Profit Factor", f"{result.profit_factor:.2f}")
-        bt7.metric("Avg Trade", f"{result.avg_trade_pct:.2f}%")
-
-    if user:
-        with st.expander("Google Authenticator Setup"):
-            st.write("Keep this QR code private. It can generate valid login codes for your account.")
-            st.image(auth_store.qr_image(user), caption="Google Authenticator QR", width=220)
-            st.code(auth_store.provisioning_uri(user), language="text")
+            with st.expander("Google Authenticator Setup"):
+                st.write("Keep this QR code private. It can generate valid login codes for your account.")
+                st.image(auth_store.qr_image(user), caption="Google Authenticator QR", width=220)
+                st.code(auth_store.provisioning_uri(user), language="text")
