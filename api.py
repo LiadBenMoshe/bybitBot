@@ -5,6 +5,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Optional
@@ -58,6 +59,7 @@ class BybitClient:
         self.rate_limiter = RateLimiter(max_calls=8, period_seconds=1)
         self.http = HTTP(testnet=testnet, api_key=api_key, api_secret=api_secret)
         self.testnet = testnet
+        self.instrument_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _request(self, func: Callable[..., Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
         last_error: Optional[Exception] = None
@@ -131,6 +133,44 @@ class BybitClient:
         frame = frame.sort_values("timestamp").reset_index(drop=True)
         return frame[["timestamp", "open", "high", "low", "close", "volume", "turnover"]]
 
+    def get_instrument_info(self, category: str, symbol: str) -> dict[str, Any]:
+        cache_key = (category, symbol)
+        cached = self.instrument_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        result = self._request(self.http.get_instruments_info, category=category, symbol=symbol)
+        items = result.get("result", {}).get("list", [])
+        if not items:
+            raise BybitAPIError(f"No instrument info returned for {symbol}.")
+        self.instrument_cache[cache_key] = items[0]
+        return items[0]
+
+    def normalize_order_qty(self, category: str, symbol: str, qty: float) -> float:
+        if category == "spot":
+            return qty
+        instrument = self.get_instrument_info(category, symbol)
+        lot_size_filter = instrument.get("lotSizeFilter", {})
+        qty_step = lot_size_filter.get("qtyStep")
+        min_order_qty = lot_size_filter.get("minOrderQty")
+        max_order_qty = lot_size_filter.get("maxOrderQty")
+
+        normalized = Decimal(str(qty))
+        if qty_step:
+            step = Decimal(str(qty_step))
+            if step > 0:
+                normalized = (normalized / step).to_integral_value(rounding=ROUND_DOWN) * step
+        if min_order_qty:
+            min_qty = Decimal(str(min_order_qty))
+            if normalized < min_qty:
+                normalized = min_qty
+        if max_order_qty:
+            max_qty = Decimal(str(max_order_qty))
+            if normalized > max_qty:
+                normalized = max_qty
+        if normalized <= 0:
+            raise BybitAPIError(f"Normalized quantity for {symbol} is not tradable.")
+        return float(normalized)
+
     def place_market_order(
         self,
         category: str,
@@ -139,13 +179,14 @@ class BybitClient:
         qty: float,
         reduce_only: bool = False,
     ) -> dict[str, Any]:
+        normalized_qty = self.normalize_order_qty(category, symbol, qty)
         return self._request(
             self.http.place_order,
             category=category,
             symbol=symbol,
             side=side,
             orderType="Market",
-            qty=str(qty),
+            qty=_decimal_to_string(normalized_qty),
             reduceOnly=reduce_only,
             timeInForce="IOC",
         )
@@ -165,6 +206,10 @@ class BybitClient:
             if "pm mode cannot set leverage" in str(exc).lower():
                 raise BybitLeverageNotSupported(str(exc)) from exc
             raise
+
+
+def _decimal_to_string(value: float) -> str:
+    return format(Decimal(str(value)).normalize(), "f")
 
 
 class MarketDataStream:

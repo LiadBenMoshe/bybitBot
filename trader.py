@@ -207,18 +207,20 @@ class TraderEngine:
         stop_loss = price * (1 - self.settings.stop_loss_pct) if side == "long" else price * (1 + self.settings.stop_loss_pct)
         take_profit = price * (1 + self.settings.take_profit_pct) if side == "long" else price * (1 - self.settings.take_profit_pct)
         order_id: Optional[str] = None
+        normalized_qty = qty
         if not self.settings.paper_trading:
+            normalized_qty = self.client.normalize_order_qty(self.settings.category, symbol, qty)
             response = self.client.place_market_order(
                 category=self.settings.category,
                 symbol=symbol,
                 side="Buy" if side == "long" else "Sell",
-                qty=qty,
+                qty=normalized_qty,
             )
             order_id = response.get("result", {}).get("orderId")
         self.positions[symbol] = Position(
             symbol=symbol,
             side=side,
-            qty=qty,
+            qty=normalized_qty,
             entry_price=price,
             stop_loss=stop_loss,
             take_profit=take_profit,
@@ -231,7 +233,7 @@ class TraderEngine:
             mode="paper" if self.settings.paper_trading else "live",
             side=side,
             action="open",
-            qty=qty,
+            qty=normalized_qty,
             entry_price=price,
             exit_price=price,
             pnl=0.0,
@@ -240,7 +242,7 @@ class TraderEngine:
         self.recent_trades.insert(0, asdict(record))
         self.recent_trades = self.recent_trades[:50]
         append_jsonl(self.settings.trade_log_path, asdict(record))
-        self.logger.info("Opened %s %s at %.4f | %s", side, symbol, price, reason)
+        self.logger.info("Opened %s %s at %.4f qty %.8f | %s", side, symbol, price, normalized_qty, reason)
         self.notifier.send(build_trade_message(symbol, side, "open", price))
 
     def _close_position(self, symbol: str, price: float, reason: str) -> None:
