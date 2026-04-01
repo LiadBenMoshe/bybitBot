@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bybit Bot {{ view_mode|title }}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08101d;
+      --panel: rgba(15, 23, 42, 0.88);
+      --panel-2: rgba(23, 35, 58, 0.92);
+      --border: rgba(110, 129, 172, 0.28);
+      --text: #f8fafc;
+      --muted: #9fb3cf;
+      --accent: #5eead4;
+      --good: #4ade80;
+      --bad: #fb7185;
+      --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 25%),
+        radial-gradient(circle at top right, rgba(94, 234, 212, 0.1), transparent 28%),
+        linear-gradient(180deg, #07101d 0%, #0a1323 100%);
+    }
+    .shell {
+      width: min(1180px, calc(100% - 24px));
+      margin: 20px auto;
+      display: grid;
+      gap: 16px;
+    }
+    .topbar, .panel, .stat, table {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.22);
+    }
+    .topbar {
+      border-radius: 20px;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .title h1 { margin: 0; font-size: 1.45rem; }
+    .title p { margin: 6px 0 0; color: var(--muted); }
+    .actions, .nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .nav a, button, .logout button {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 14px;
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .nav a.active {
+      border-color: rgba(94, 234, 212, 0.45);
+      background: rgba(20, 184, 166, 0.18);
+      color: var(--accent);
+    }
+    button.primary { background: rgba(20, 184, 166, 0.18); border-color: rgba(94, 234, 212, 0.45); color: var(--accent); }
+    button.danger { color: #fecdd3; border-color: rgba(251, 113, 133, 0.35); background: rgba(127, 29, 29, 0.26); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+    }
+    .stat {
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 106px;
+    }
+    .stat .label { color: var(--muted); font-size: 0.92rem; }
+    .stat .value { margin-top: 8px; font-size: 1.6rem; font-weight: 700; }
+    .stat.good .value { color: var(--good); }
+    .stat.bad .value { color: var(--bad); }
+    .panel {
+      border-radius: 20px;
+      padding: 16px;
+    }
+    .panel h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .status-line {
+      margin-top: 10px;
+      min-height: 24px;
+      color: var(--muted);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(110, 129, 172, 0.16);
+      text-align: left;
+      font-size: 0.93rem;
+    }
+    th { color: var(--muted); background: rgba(15, 23, 42, 0.98); }
+    .hidden { display: none; }
+    .stack { display: grid; gap: 16px; }
+    .inline-form {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    select {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 14px;
+      min-width: 180px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(20, 184, 166, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(94, 234, 212, 0.24);
+      font-size: 0.85rem;
+    }
+    .logout { margin: 0; }
+    @media (max-width: 720px) {
+      .shell { width: min(100%, calc(100% - 16px)); margin: 8px auto 18px; }
+      .topbar, .panel, .stat { border-radius: 16px; }
+      .topbar { padding: 14px; }
+      .stat .value { font-size: 1.35rem; }
+      th, td { padding: 9px 10px; font-size: 0.88rem; }
+    }
+  </style>
+</head>
+<body data-view="{{ view_mode }}" data-refresh-control="{{ settings.control_refresh_seconds }}" data-refresh-dashboard="{{ settings.dashboard_refresh_seconds }}">
+  <main class="shell">
+    <section class="topbar">
+      <div class="title">
+        <h1>Bybit Trading Bot</h1>
+        <p>FastAPI control surface with the existing trading engine underneath.</p>
+      </div>
+      <div class="actions">
+        <nav class="nav">
+          <a href="/control" class="{% if view_mode == 'control' %}active{% endif %}">Control</a>
+          <a href="/dashboard" class="{% if view_mode == 'dashboard' %}active{% endif %}">Dashboard</a>
+        </nav>
+        {% if settings.auth_enabled and user %}
+        <span class="pill">{{ user.username }} · {{ user.role }}</span>
+        <form class="logout" method="post" action="/logout">
+          <button type="submit">Log Out</button>
+        </form>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="inline-form">
+        <button id="start-btn" class="primary" type="button">Start Bot</button>
+        <button id="stop-btn" class="danger" type="button">Stop Bot</button>
+        <span id="action-status" class="status-line"></span>
+      </div>
+      <div class="meta">
+        <div>Mode: <strong>{{ "Paper" if settings.paper_trading else "Live" }}</strong></div>
+        <div>Category: <strong>{{ settings.category }}</strong></div>
+        <div>Symbols: <strong>{{ ", ".join(settings.symbols) }}</strong></div>
+        <div>Backtest Filter: <strong>{{ "On" if settings.filter_symbols_by_backtest else "Off" }}</strong></div>
+      </div>
+    </section>
+
+    <section id="stats" class="grid"></section>
+
+    <section id="dashboard-sections" class="stack {% if view_mode != 'dashboard' %}hidden{% endif %}">
+      <section class="panel">
+        <h2>Open Positions</h2>
+        <div id="positions-table"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Recent Trades</h2>
+        <div id="trades-table"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Symbol Filter</h2>
+        <div id="filter-table"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Quick Backtest</h2>
+        <div class="inline-form">
+          <select id="backtest-symbol">
+            {% for symbol in settings.symbols %}
+            <option value="{{ symbol }}">{{ symbol }}</option>
+            {% endfor %}
+          </select>
+          <button id="backtest-btn" class="primary" type="button">Run Backtest</button>
+        </div>
+        <div id="backtest-result" class="status-line"></div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const body = document.body;
+    const view = body.dataset.view;
+    const refreshSeconds = view === "control"
+      ? Number(body.dataset.refreshControl)
+      : Number(body.dataset.refreshDashboard);
+
+    const statsEl = document.getElementById("stats");
+    const positionsEl = document.getElementById("positions-table");
+    const tradesEl = document.getElementById("trades-table");
+    const filterEl = document.getElementById("filter-table");
+    const actionStatusEl = document.getElementById("action-status");
+    const backtestResultEl = document.getElementById("backtest-result");
+
+    function toneClass(value) {
+      if (typeof value === "number") {
+        if (value > 0) return "good";
+        if (value < 0) return "bad";
+      }
+      return "";
+    }
+
+    function renderStatCard(label, value, tone = "") {
+      return `<article class="stat ${tone}"><div class="label">${label}</div><div class="value">${value}</div></article>`;
+    }
+
+    function formatMoney(value) {
+      return `${Number(value).toFixed(2)} USDT`;
+    }
+
+    function renderTable(rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="status-line">No data yet.</div>`;
+      }
+      const columns = Object.keys(rows[0]);
+      const head = columns.map((column) => `<th>${column}</th>`).join("");
+      const body = rows.map((row) => {
+        const cells = columns.map((column) => `<td>${row[column] ?? ""}</td>`).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    function renderStats(snapshot) {
+      if (view === "control") {
+        statsEl.innerHTML = [
+          renderStatCard("Bot Status", snapshot.status, snapshot.status === "Running" ? "good" : "bad"),
+          renderStatCard("Total PnL", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
+          renderStatCard("Open Positions", snapshot.open_position_count),
+          renderStatCard("Trades", snapshot.trade_count),
+          renderStatCard("Balance", formatMoney(snapshot.balance)),
+          renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
+        ].join("");
+        actionStatusEl.textContent = snapshot.last_error
+          ? `Last error: ${snapshot.last_error}`
+          : `Last update: ${snapshot.last_update}`;
+        return;
+      }
+
+      statsEl.innerHTML = [
+        renderStatCard("Bot Status", snapshot.status, snapshot.status === "Running" ? "good" : "bad"),
+        renderStatCard("Trades Executed", snapshot.trade_count),
+        renderStatCard("Balance", formatMoney(snapshot.balance)),
+        renderStatCard("Total PnL", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
+        renderStatCard("Open Positions", snapshot.open_positions.length),
+        renderStatCard("Realized PnL", formatMoney(snapshot.realized_pnl), toneClass(snapshot.realized_pnl)),
+        renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
+      ].join("");
+      positionsEl.innerHTML = renderTable(snapshot.open_positions);
+      tradesEl.innerHTML = renderTable(snapshot.recent_trades);
+      filterEl.innerHTML = renderTable(snapshot.symbol_filter_results);
+      actionStatusEl.textContent = snapshot.last_error
+        ? `Last error: ${snapshot.last_error}`
+        : `Last update: ${snapshot.last_update}`;
+    }
+
+    async function loadSnapshot() {
+      const endpoint = view === "control" ? "/api/control_snapshot" : "/api/dashboard_snapshot";
+      const response = await fetch(endpoint, { credentials: "same-origin" });
+      if (response.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const payload = await response.json();
+      if (!response.ok) {
+        actionStatusEl.textContent = payload.error || "Failed to load snapshot.";
+        return;
+      }
+      renderStats(payload);
+    }
+
+    async function postAction(endpoint) {
+      const response = await fetch(endpoint, { method: "POST", credentials: "same-origin" });
+      const payload = await response.json();
+      actionStatusEl.textContent = payload.error || payload.status || "Done.";
+      if (response.ok) {
+        await loadSnapshot();
+      }
+    }
+
+    async function runBacktest() {
+      const symbol = document.getElementById("backtest-symbol").value;
+      const formData = new FormData();
+      formData.append("symbol", symbol);
+      backtestResultEl.textContent = `Running backtest for ${symbol}...`;
+      const response = await fetch("/api/backtest", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin"
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        backtestResultEl.textContent = payload.error || "Backtest failed.";
+        return;
+      }
+      backtestResultEl.textContent =
+        `${payload.symbol}: Return ${payload.total_return_pct}% | Trades ${payload.trades} | Win ${payload.win_rate_pct}% | PF ${payload.profit_factor}`;
+    }
+
+    document.getElementById("start-btn").addEventListener("click", () => postAction("/api/start"));
+    document.getElementById("stop-btn").addEventListener("click", () => postAction("/api/stop"));
+    if (view === "dashboard") {
+      document.getElementById("backtest-btn").addEventListener("click", runBacktest);
+    }
+
+    loadSnapshot();
+    window.setInterval(loadSnapshot, refreshSeconds * 1000);
+  </script>
+</body>
+</html>

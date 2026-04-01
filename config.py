@@ -40,6 +40,13 @@ class Settings:
     auth_session_minutes: int = field(default_factory=lambda: int(os.getenv("AUTH_SESSION_MINUTES", "480")))
     auth_totp_issuer: str = field(default_factory=lambda: os.getenv("AUTH_TOTP_ISSUER", "Bybit Trading Bot"))
     auth_audit_log_file: str = field(default_factory=lambda: os.getenv("AUTH_AUDIT_LOG_FILE", "auth_audit.jsonl"))
+    auth_cookie_secret: str = field(default_factory=lambda: os.getenv("AUTH_COOKIE_SECRET", ""))
+    auth_cookie_name: str = field(default_factory=lambda: os.getenv("AUTH_COOKIE_NAME", "bybit_bot_session"))
+    app_host: str = field(default_factory=lambda: os.getenv("APP_HOST", "0.0.0.0"))
+    app_port: int = field(default_factory=lambda: int(os.getenv("APP_PORT", "8501")))
+    dashboard_refresh_seconds: int = field(default_factory=lambda: int(os.getenv("DASHBOARD_REFRESH_SECONDS", "6")))
+    control_refresh_seconds: int = field(default_factory=lambda: int(os.getenv("CONTROL_REFRESH_SECONDS", "10")))
+    mobile_default_view: bool = field(default_factory=lambda: os.getenv("MOBILE_DEFAULT_VIEW", "true").lower() == "true")
     ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "12")))
     ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "26")))
     rsi_period: int = field(default_factory=lambda: int(os.getenv("RSI_PERIOD", "14")))
@@ -103,6 +110,14 @@ class Settings:
             raise ValueError("MIN_BACKTEST_TRADES must be non-negative.")
         if self.auth_session_minutes <= 0:
             raise ValueError("AUTH_SESSION_MINUTES must be positive.")
+        if self.auth_enabled and not self.auth_cookie_secret:
+            raise ValueError("AUTH_COOKIE_SECRET is required when AUTH_ENABLED is true.")
+        if self.app_port <= 0 or self.app_port > 65535:
+            raise ValueError("APP_PORT must be between 1 and 65535.")
+        if self.dashboard_refresh_seconds <= 0:
+            raise ValueError("DASHBOARD_REFRESH_SECONDS must be positive.")
+        if self.control_refresh_seconds <= 0:
+            raise ValueError("CONTROL_REFRESH_SECONDS must be positive.")
 
 
 def get_settings() -> Settings:

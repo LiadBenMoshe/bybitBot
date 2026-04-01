@@ -347,3 +347,18 @@ class TraderEngine:
                 "last_update": datetime.now(timezone.utc).isoformat(),
                 "last_error": self.last_error,
             }
+
+    def get_compact_snapshot(self) -> Dict[str, Any]:
+        with self.lock:
+            unrealized = sum(position.unrealized_pnl for position in self.positions.values())
+            return {
+                "status": self.status,
+                "trade_count": self.trade_count,
+                "open_position_count": len(self.positions),
+                "realized_pnl": round(self.realized_pnl, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "total_pnl": round(self.realized_pnl + unrealized, 2),
+                "balance": round(self.cash_balance, 2),
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "last_error": self.last_error,
+            }

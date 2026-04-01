@@ -5,13 +5,11 @@ import hashlib
 import hmac
 import json
 import os
+from functools import lru_cache
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
-
-import pyotp
-import qrcode
 
 from config import Settings
 from logger import append_jsonl
@@ -47,18 +45,12 @@ class AuthStore:
         self.users_path.parent.mkdir(parents=True, exist_ok=True)
 
     def load_users(self) -> dict[str, AuthUser]:
-        if not self.users_path.exists():
-            return {}
-        payload = json.loads(self.users_path.read_text(encoding="utf-8"))
-        users: dict[str, AuthUser] = {}
-        for item in payload:
-            user = AuthUser(**item)
-            users[user.username.lower()] = user
-        return users
+        return _load_users_cached(self.users_path, _users_cache_key(self.users_path))
 
     def save_users(self, users: dict[str, AuthUser]) -> None:
         payload = [asdict(user) for user in sorted(users.values(), key=lambda user: user.username.lower())]
         self.users_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        _load_users_cached.cache_clear()
 
     def get_user(self, username: str) -> Optional[AuthUser]:
         return self.load_users().get(username.strip().lower())
@@ -79,7 +71,7 @@ class AuthStore:
             username=normalized,
             role="admin",
             password_hash=hash_password(password),
-            totp_secret=pyotp.random_base32(),
+            totp_secret=_pyotp().random_base32(),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         users[normalized.lower()] = user
@@ -93,15 +85,18 @@ class AuthStore:
         if not verify_password(password, user.password_hash):
             return None
         normalized_code = "".join(char for char in totp_code if char.isdigit())
-        if not normalized_code or not pyotp.TOTP(user.totp_secret).verify(normalized_code, valid_window=1):
+        if not normalized_code or not _pyotp().TOTP(user.totp_secret).verify(normalized_code, valid_window=1):
             return None
         return user
 
     def provisioning_uri(self, user: AuthUser) -> str:
-        return pyotp.TOTP(user.totp_secret).provisioning_uri(name=user.username, issuer_name=self.settings.auth_totp_issuer)
+        return _pyotp().TOTP(user.totp_secret).provisioning_uri(
+            name=user.username,
+            issuer_name=self.settings.auth_totp_issuer,
+        )
 
     def qr_image(self, user: AuthUser) -> Any:
-        qr = qrcode.make(self.provisioning_uri(user))
+        qr = _qrcode().make(self.provisioning_uri(user))
         return qr.get_image() if hasattr(qr, "get_image") else qr
 
     def log_event(
@@ -156,3 +151,77 @@ def session_expiry(settings: Settings) -> datetime:
 
 def has_permission(user: AuthUser, permission: str) -> bool:
     return permission in user.permissions
+
+
+def create_session_token(settings: Settings, user: AuthUser, expires_at: datetime) -> str:
+    payload = {
+        "username": user.username,
+        "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+    }
+    encoded = _urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = _sign_value(settings.auth_cookie_secret, encoded)
+    return f"{encoded}.{signature}"
+
+
+def verify_session_token(settings: Settings, token: str) -> Optional[dict[str, str]]:
+    try:
+        encoded, signature = token.split(".", 1)
+    except ValueError:
+        return None
+    expected_signature = _sign_value(settings.auth_cookie_secret, encoded)
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+    try:
+        payload = json.loads(_urlsafe_b64decode(encoded).decode("utf-8"))
+    except Exception:
+        return None
+    username = str(payload.get("username", "")).strip()
+    expires_at = str(payload.get("expires_at", "")).strip()
+    if not username or not expires_at:
+        return None
+    return {"username": username, "expires_at": expires_at}
+
+
+def _users_cache_key(path: Path) -> tuple[bool, int, int]:
+    if not path.exists():
+        return (False, 0, 0)
+    stat = path.stat()
+    return (True, stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=8)
+def _load_users_cached(path: Path, cache_key: tuple[bool, int, int]) -> dict[str, AuthUser]:
+    if not cache_key[0]:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    users: dict[str, AuthUser] = {}
+    for item in payload:
+        user = AuthUser(**item)
+        users[user.username.lower()] = user
+    return users
+
+
+def _pyotp():
+    import pyotp
+
+    return pyotp
+
+
+def _qrcode():
+    import qrcode
+
+    return qrcode
+
+
+def _sign_value(secret: str, value: str) -> str:
+    digest = hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).digest()
+    return _urlsafe_b64encode(digest)
+
+
+def _urlsafe_b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _urlsafe_b64decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))

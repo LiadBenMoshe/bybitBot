@@ -1,13 +1,14 @@
 # Bybit Trading Bot
 
-Python 3.10+ crypto trading bot with official Bybit integration, paper/live trading, technical-indicator strategy logic, and a Streamlit dashboard.
+Python 3.10+ crypto trading bot with official Bybit integration, paper/live trading, technical-indicator strategy logic, and a FastAPI control UI.
 
 ## Modules
 
 - `api.py` - Bybit REST/WebSocket integration with retry and rate limiting
 - `strategy.py` - EMA, RSI, and MACD based signal generation
 - `trader.py` - execution engine, risk controls, logging, and position handling
-- `ui.py` - Streamlit dashboard
+- `webapp.py` - FastAPI routes, auth session handling, and HTML rendering
+- `templates/` - lightweight HTML pages for login and control/dashboard views
 - `main.py` - application entrypoint
 - `backtest.py` - simple historical backtesting
 
@@ -46,16 +47,31 @@ Key tuning values:
 - `INVERT_SIGNALS=true` flips every buy to a sell and every sell to a buy
 - `FILTER_SYMBOLS_BY_BACKTEST=true` only trades symbols that pass the startup backtest gate
 - `MIN_BACKTEST_PROFIT_FACTOR`, `MAX_BACKTEST_DRAWDOWN_PCT`, and `MIN_BACKTEST_TRADES` control symbol approval
+- `DASHBOARD_REFRESH_SECONDS` controls how often the full dashboard refreshes
+- `CONTROL_REFRESH_SECONDS` controls how often the lighter phone control page refreshes
+- `MOBILE_DEFAULT_VIEW=true` makes the lighter control page the default first screen
 
 ## Run
 
 ```powershell
-streamlit run main.py
+python main.py
 ```
 
-## Streamlit Auth
+The app serves on `http://<host>:8501` by default. For phone access over Tailscale, the control page is:
 
-This app now supports a simple built-in login flow with role-based permissions and Google Authenticator TOTP.
+```text
+http://<your-tailnet-host>:8501/control
+```
+
+For phone access over Tailscale, open the lighter control page directly:
+
+```text
+http://<your-tailnet-host>:8501/?view=control
+```
+
+## Web Auth
+
+This app supports a built-in login flow with role-based permissions, Google Authenticator TOTP, and a persistent signed session cookie.
 
 Configure these values in `.env`:
 
@@ -63,6 +79,10 @@ Configure these values in `.env`:
 - `AUTH_USERS_FILE=secrets/auth_users.json`
 - `AUTH_SESSION_MINUTES=480`
 - `AUTH_TOTP_ISSUER=Bybit Trading Bot`
+- `AUTH_COOKIE_SECRET=change-this-to-a-long-random-secret`
+- `AUTH_COOKIE_NAME=bybit_bot_session`
+- `APP_HOST=0.0.0.0`
+- `APP_PORT=8501`
 
 First-time setup:
 

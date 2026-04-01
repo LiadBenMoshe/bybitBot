@@ -47,7 +47,38 @@ class Backtester:
 
     def run(self, symbol: str, candles: int = 500) -> BacktestResult:
         frame = self.client.get_kline(self.settings.category, symbol, self.settings.timeframe, limit=candles)
+        required_columns = {"timestamp", "open", "high", "low", "close", "volume", "turnover"}
+        if frame.empty or not required_columns.issubset(frame.columns):
+            missing = sorted(required_columns.difference(frame.columns))
+            reason = "No market data returned." if frame.empty else f"Missing columns: {', '.join(missing)}"
+            return self.evaluate_result(
+                BacktestResult(
+                    symbol=symbol,
+                    total_return_pct=0.0,
+                    trades=0,
+                    win_rate_pct=0.0,
+                    final_equity=round(self.settings.initial_balance, 2),
+                    max_drawdown_pct=0.0,
+                    profit_factor=0.0,
+                    avg_trade_pct=0.0,
+                    filter_reason=reason,
+                )
+            )
         frame = self.strategy.apply_indicators(frame).dropna().reset_index(drop=True)
+        if frame.empty:
+            return self.evaluate_result(
+                BacktestResult(
+                    symbol=symbol,
+                    total_return_pct=0.0,
+                    trades=0,
+                    win_rate_pct=0.0,
+                    final_equity=round(self.settings.initial_balance, 2),
+                    max_drawdown_pct=0.0,
+                    profit_factor=0.0,
+                    avg_trade_pct=0.0,
+                    filter_reason="Not enough indicator-ready candles.",
+                )
+            )
         equity = self.settings.initial_balance
         peak_equity = equity
         wins = 0
@@ -121,6 +152,8 @@ class Backtester:
 
     def evaluate_result(self, result: BacktestResult) -> BacktestResult:
         reasons: list[str] = []
+        if result.filter_reason and result.filter_reason != "Passed":
+            reasons.append(result.filter_reason)
         if result.profit_factor < self.settings.min_backtest_profit_factor:
             reasons.append(f"profit factor {result.profit_factor:.2f} < {self.settings.min_backtest_profit_factor:.2f}")
         if result.max_drawdown_pct > self.settings.max_backtest_drawdown_pct:

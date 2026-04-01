@@ -1,30 +1,41 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
-from auth import AuthStore, AuthUser, has_permission, session_expiry
-from backtest import Backtester
+from auth import AuthStore, AuthUser, create_session_token, has_permission, session_expiry, verify_session_token
 from config import get_settings
-from trader import TraderEngine
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from backtest import Backtester
+    from trader import TraderEngine
+
+SETTINGS = get_settings()
 
 
 @st.cache_resource
-def get_engine() -> TraderEngine:
-    return TraderEngine(get_settings())
+def get_engine() -> "TraderEngine":
+    from trader import TraderEngine
+
+    return TraderEngine(SETTINGS)
 
 
 @st.cache_resource
-def get_backtester() -> Backtester:
-    return Backtester(get_settings())
+def get_backtester() -> "Backtester":
+    from backtest import Backtester
+
+    return Backtester(SETTINGS)
 
 
 def _get_view_mode() -> str:
-    raw_value = st.query_params.get("view", "dashboard")
+    default_view = "control" if SETTINGS.mobile_default_view else "dashboard"
+    raw_value = st.query_params.get("view", default_view)
     if isinstance(raw_value, list):
-        raw_value = raw_value[0] if raw_value else "dashboard"
+        raw_value = raw_value[0] if raw_value else default_view
     return "control" if str(raw_value).lower() == "control" else "dashboard"
 
 
@@ -59,7 +70,7 @@ def _tone_from_pnl(value: float) -> str:
     return "neutral"
 
 
-def _style_trades(frame: pd.DataFrame):
+def _style_trades(frame: "pd.DataFrame"):
     def color_pnl(value: float) -> str:
         if value > 0:
             return "color: #146c2e; font-weight: 700;"
@@ -82,8 +93,10 @@ def _style_trades(frame: pd.DataFrame):
     return styled
 
 
-@st.fragment(run_every="3s")
-def render_live_snapshot(engine: TraderEngine) -> None:
+@st.fragment(run_every=f"{SETTINGS.dashboard_refresh_seconds}s")
+def render_live_snapshot(engine: "TraderEngine") -> None:
+    import pandas as pd
+
     snapshot = engine.get_snapshot()
 
     row1 = st.columns(5)
@@ -135,9 +148,9 @@ def render_live_snapshot(engine: TraderEngine) -> None:
     st.caption(f"Last update: {snapshot['last_update']}")
 
 
-@st.fragment(run_every="5s")
-def render_mobile_control_snapshot(engine: TraderEngine) -> None:
-    snapshot = engine.get_snapshot()
+@st.fragment(run_every=f"{SETTINGS.control_refresh_seconds}s")
+def render_mobile_control_snapshot(engine: "TraderEngine") -> None:
+    snapshot = engine.get_compact_snapshot()
     status_tone = "green" if snapshot["status"] == "Running" else "red"
     col1, col2 = st.columns(2)
     with col1:
@@ -147,9 +160,19 @@ def render_mobile_control_snapshot(engine: TraderEngine) -> None:
 
     col3, col4 = st.columns(2)
     with col3:
-        _render_stat_card("Open Positions", str(len(snapshot["open_positions"])))
+        _render_stat_card("Open Positions", str(snapshot["open_position_count"]))
     with col4:
         _render_stat_card("Trades", str(snapshot["trade_count"]))
+
+    col5, col6 = st.columns(2)
+    with col5:
+        _render_stat_card("Balance", f"{snapshot['balance']:.2f} USDT")
+    with col6:
+        _render_stat_card(
+            "Unrealized PnL",
+            f"{snapshot['unrealized_pnl']:.2f} USDT",
+            _tone_from_pnl(snapshot["unrealized_pnl"]),
+        )
 
     if snapshot["last_error"]:
         st.error(snapshot["last_error"])
@@ -162,25 +185,85 @@ def _clear_auth_session() -> None:
         st.session_state.pop(key, None)
 
 
+def _set_auth_cookie(token: str, expires_at: datetime) -> None:
+    expires_utc = expires_at.astimezone(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    cookie_name = SETTINGS.auth_cookie_name
+    components.html(
+        f"""
+        <script>
+        document.cookie = "{cookie_name}={token}; expires={expires_utc}; path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _clear_auth_cookie() -> None:
+    cookie_name = SETTINGS.auth_cookie_name
+    components.html(
+        f"""
+        <script>
+        document.cookie = "{cookie_name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _restore_auth_session_from_cookie(auth_store: AuthStore) -> AuthUser | None:
+    token = st.context.cookies.get(SETTINGS.auth_cookie_name)
+    if not token:
+        return None
+    payload = verify_session_token(auth_store.settings, token)
+    if not payload:
+        _clear_auth_cookie()
+        return None
+    username = payload["username"]
+    expires_at = payload["expires_at"]
+    try:
+        expiry = datetime.fromisoformat(expires_at)
+    except ValueError:
+        _clear_auth_cookie()
+        return None
+    if expiry <= datetime.now(timezone.utc):
+        auth_store.log_event("session_expired", success=True, username=username)
+        _clear_auth_cookie()
+        return None
+    user = auth_store.get_user(username)
+    if not user or user.disabled:
+        _clear_auth_cookie()
+        return None
+    st.session_state["auth_username"] = user.username
+    st.session_state["auth_role"] = user.role
+    st.session_state["auth_expires_at"] = expires_at
+    return user
+
+
 def _get_authenticated_user(auth_store: AuthStore) -> AuthUser | None:
     username = st.session_state.get("auth_username", "")
     expires_at = st.session_state.get("auth_expires_at", "")
     if not username or not expires_at:
-        return None
+        return _restore_auth_session_from_cookie(auth_store)
     try:
         expiry = datetime.fromisoformat(expires_at)
     except ValueError:
         _clear_auth_session()
+        _clear_auth_cookie()
         return None
     if expiry <= datetime.now(timezone.utc):
         auth_store.log_event("session_expired", success=True, username=username)
         _clear_auth_session()
+        _clear_auth_cookie()
         return None
     user = auth_store.get_user(username)
     if not user or user.disabled:
         _clear_auth_session()
+        _clear_auth_cookie()
         return None
-    st.session_state["auth_expires_at"] = session_expiry(auth_store.settings).isoformat()
+    refreshed_expiry = session_expiry(auth_store.settings)
+    refreshed_expiry_iso = refreshed_expiry.isoformat()
+    st.session_state["auth_expires_at"] = refreshed_expiry_iso
+    _set_auth_cookie(create_session_token(auth_store.settings, user, refreshed_expiry), refreshed_expiry)
     return user
 
 
@@ -224,7 +307,9 @@ def _render_login(auth_store: AuthStore) -> AuthUser | None:
         return None
     st.session_state["auth_username"] = user.username
     st.session_state["auth_role"] = user.role
-    st.session_state["auth_expires_at"] = session_expiry(auth_store.settings).isoformat()
+    expires_at = session_expiry(auth_store.settings)
+    st.session_state["auth_expires_at"] = expires_at.isoformat()
+    _set_auth_cookie(create_session_token(auth_store.settings, user, expires_at), expires_at)
     auth_store.log_event("login_success", success=True, username=user.username)
     st.rerun()
     return user
@@ -248,7 +333,7 @@ def render_dashboard() -> None:
     view_mode = _get_view_mode()
     st.title("Bybit Trading Bot Dashboard" if view_mode == "dashboard" else "Bybit Bot Control")
 
-    settings = get_settings()
+    settings = SETTINGS
     auth_store = AuthStore(settings)
 
     if settings.auth_enabled:
@@ -298,11 +383,12 @@ def render_dashboard() -> None:
     if user and st.sidebar.button("Log Out", width="stretch"):
         auth_store.log_event("logout", success=True, username=user.username)
         _clear_auth_session()
+        _clear_auth_cookie()
         st.rerun()
     st.sidebar.caption("Edit `.env` to change trading parameters, then restart Streamlit.")
     if view_mode == "control":
         render_mobile_control_snapshot(engine)
-        st.info("Tip: bookmark this page on your phone with `?view=control` for a faster remote control screen.")
+        st.info("This control view is optimized for phone access over Tailscale. Open `?view=control` directly for the fastest load.")
     else:
         render_live_snapshot(engine)
 

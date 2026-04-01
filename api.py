@@ -84,6 +84,10 @@ class BybitClient:
         kwargs: Dict[str, Any] = {"category": category}
         if symbol:
             kwargs["symbol"] = symbol
+        elif category == "linear":
+            kwargs["settleCoin"] = "USDT"
+        elif category == "inverse":
+            kwargs["settleCoin"] = "BTC"
         result = self._request(self.http.get_positions, **kwargs)
         return result.get("result", {}).get("list", [])
 
@@ -97,11 +101,26 @@ class BybitClient:
         )
         rows = result.get("result", {}).get("list", [])
         if not rows:
-            return pd.DataFrame()
-        frame = pd.DataFrame(
-            rows,
-            columns=["start_time", "open", "high", "low", "close", "volume", "turnover"],
-        )
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+
+        if isinstance(rows[0], dict):
+            frame = pd.DataFrame(rows).rename(
+                columns={
+                    "start": "start_time",
+                }
+            )
+        else:
+            frame = pd.DataFrame(
+                rows,
+                columns=["start_time", "open", "high", "low", "close", "volume", "turnover"],
+            )
+
+        required_columns = ["start_time", "open", "high", "low", "close", "volume", "turnover"]
+        missing_columns = [column for column in required_columns if column not in frame.columns]
+        if missing_columns:
+            self.logger.warning("Kline response for %s missing columns: %s", symbol, ", ".join(missing_columns))
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+
         for column in ["open", "high", "low", "close", "volume", "turnover"]:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
         frame["timestamp"] = pd.to_datetime(frame["start_time"].astype("int64"), unit="ms", utc=True)
