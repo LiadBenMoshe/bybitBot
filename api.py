@@ -36,6 +36,10 @@ class BybitAPIError(RuntimeError):
     pass
 
 
+class BybitLeverageNotSupported(BybitAPIError):
+    pass
+
+
 @dataclass(slots=True)
 class KlineEvent:
     symbol: str
@@ -149,13 +153,18 @@ class BybitClient:
     def set_leverage(self, category: str, symbol: str, leverage: int) -> None:
         if category == "spot":
             return
-        self._request(
-            self.http.set_leverage,
-            category=category,
-            symbol=symbol,
-            buyLeverage=str(leverage),
-            sellLeverage=str(leverage),
-        )
+        try:
+            self._request(
+                self.http.set_leverage,
+                category=category,
+                symbol=symbol,
+                buyLeverage=str(leverage),
+                sellLeverage=str(leverage),
+            )
+        except BybitAPIError as exc:
+            if "pm mode cannot set leverage" in str(exc).lower():
+                raise BybitLeverageNotSupported(str(exc)) from exc
+            raise
 
 
 class MarketDataStream:

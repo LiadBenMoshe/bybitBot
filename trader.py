@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from api import BybitClient, MarketDataStream
+from api import BybitClient, BybitLeverageNotSupported, MarketDataStream
 from config import Settings
 from logger import append_jsonl
 from models import Position, Signal, TradeRecord
@@ -88,6 +88,8 @@ class TraderEngine:
             for symbol in self.active_symbols:
                 try:
                     self.client.set_leverage(self.settings.category, symbol, self.settings.leverage)
+                except BybitLeverageNotSupported as exc:
+                    self.logger.info("Leverage setup skipped for %s because the account is in portfolio margin mode: %s", symbol, exc)
                 except Exception as exc:
                     self.logger.warning("Leverage setup skipped for %s: %s", symbol, exc)
 
