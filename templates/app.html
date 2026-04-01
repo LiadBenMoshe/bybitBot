@@ -134,6 +134,35 @@
       padding: 10px 14px;
       min-width: 180px;
     }
+    input[type="text"] {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 14px;
+      min-width: 220px;
+      width: min(100%, 360px);
+    }
+    .settings-form {
+      display: grid;
+      gap: 12px;
+    }
+    .settings-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .checkbox-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+    }
+    .note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
     .pill {
       display: inline-block;
       padding: 6px 10px;
@@ -188,6 +217,25 @@
       </div>
     </section>
 
+    <section class="panel">
+      <h2>Strategy Controls</h2>
+      <form id="settings-form" class="settings-form">
+        <div class="settings-row">
+          <label for="trading-symbols">Trading Symbols</label>
+          <input id="trading-symbols" name="trading_symbols" type="text" value="{{ ','.join(settings.symbols) }}" placeholder="BTCUSDT,ETHUSDT">
+        </div>
+        <label class="checkbox-row" for="invert-signals">
+          <input id="invert-signals" name="invert_signals" type="checkbox" {% if settings.invert_signals %}checked{% endif %}>
+          <span>Invert Signals</span>
+        </label>
+        <div class="settings-row">
+          <button id="save-settings-btn" class="primary" type="submit">Save Settings</button>
+          <span id="settings-status" class="status-line"></span>
+        </div>
+      </form>
+      <div class="note">These changes update <code>.env</code> and are applied on the next bot start. The bot must be stopped first.</div>
+    </section>
+
     <section id="stats" class="grid"></section>
 
     <section id="dashboard-sections" class="stack {% if view_mode != 'dashboard' %}hidden{% endif %}">
@@ -234,6 +282,7 @@
     const filterEl = document.getElementById("filter-table");
     const actionStatusEl = document.getElementById("action-status");
     const backtestResultEl = document.getElementById("backtest-result");
+    const settingsStatusEl = document.getElementById("settings-status");
 
     function toneClass(value) {
       if (typeof value === "number") {
@@ -340,8 +389,31 @@
         `${payload.symbol}: Return ${payload.total_return_pct}% | Trades ${payload.trades} | Win ${payload.win_rate_pct}% | PF ${payload.profit_factor}`;
     }
 
+    async function saveSettings(event) {
+      event.preventDefault();
+      const formData = new FormData();
+      formData.append("trading_symbols", document.getElementById("trading-symbols").value);
+      if (document.getElementById("invert-signals").checked) {
+        formData.append("invert_signals", "true");
+      }
+      settingsStatusEl.textContent = "Saving settings...";
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin"
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        settingsStatusEl.textContent = payload.error || "Failed to save settings.";
+        return;
+      }
+      settingsStatusEl.textContent = payload.message || "Settings saved.";
+      window.setTimeout(() => window.location.reload(), 500);
+    }
+
     document.getElementById("start-btn").addEventListener("click", () => postAction("/api/start"));
     document.getElementById("stop-btn").addEventListener("click", () => postAction("/api/stop"));
+    document.getElementById("settings-form").addEventListener("submit", saveSettings);
     if (view === "dashboard") {
       document.getElementById("backtest-btn").addEventListener("click", runBacktest);
     }

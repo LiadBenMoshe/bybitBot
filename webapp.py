@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -12,6 +12,7 @@ from fastapi import FastAPI, Form, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from dotenv import load_dotenv
 
 from auth import AuthStore, AuthUser, create_session_token, has_permission, session_expiry, verify_session_token
 from backtest import Backtester
@@ -47,6 +48,7 @@ def get_auth_store() -> AuthStore:
 
 
 app = FastAPI(title="Bybit Trading Bot")
+ENV_PATH = BASE_DIR / ".env"
 
 
 def _default_view_path() -> str:
@@ -142,6 +144,41 @@ def _permission_denied(auth_store: AuthStore, user: Optional[AuthUser], permissi
 
 def _json_response(payload, status_code: int = 200) -> JSONResponse:
     return JSONResponse(content=jsonable_encoder(payload), status_code=status_code)
+
+
+def _reload_runtime_settings() -> None:
+    load_dotenv(ENV_PATH, override=True)
+    fresh_settings = get_settings()
+    for field in fields(Settings):
+        setattr(SETTINGS, field.name, getattr(fresh_settings, field.name))
+    get_engine.cache_clear()
+    get_backtester.cache_clear()
+    get_auth_store.cache_clear()
+
+
+def _update_env_values(updates: dict[str, str]) -> None:
+    lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
+    seen: set[str] = set()
+    new_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            new_lines.append(line)
+            continue
+        key, _, value = line.partition("=")
+        env_key = key.strip()
+        if env_key in updates:
+            new_lines.append(f"{env_key}={updates[env_key]}")
+            seen.add(env_key)
+        else:
+            new_lines.append(line)
+
+    for key, value in updates.items():
+        if key not in seen:
+            new_lines.append(f"{key}={value}")
+
+    ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
 @app.get("/", response_class=HTMLResponse, response_model=None)
@@ -301,6 +338,64 @@ def _authorized_session(request: Request, permission: str, action_label: str) ->
     if session.user and not has_permission(session.user, permission):
         return _permission_denied(auth_store, session.user, permission, action_label)
     return session.user, auth_store
+
+
+@app.post("/api/settings")
+def update_runtime_settings(
+    request: Request,
+    trading_symbols: str = Form(...),
+    invert_signals: Optional[str] = Form(None),
+) -> JSONResponse:
+    authorized = _authorized_session(request, "start_bot", "Update Settings")
+    if isinstance(authorized, JSONResponse):
+        return authorized
+    user, auth_store = authorized
+    engine = get_engine()
+    if engine.status == "Running":
+        response = _json_response(
+            {"error": "Stop the bot before changing TRADING_SYMBOLS or INVERT_SIGNALS."},
+            status_code=409,
+        )
+        if user:
+            _set_session_cookie(response, user, session_expiry(SETTINGS))
+        return response
+
+    normalized_symbols = ",".join(symbol.strip().upper() for symbol in trading_symbols.split(",") if symbol.strip())
+    if not normalized_symbols:
+        response = _json_response({"error": "Enter at least one trading symbol."}, status_code=400)
+        if user:
+            _set_session_cookie(response, user, session_expiry(SETTINGS))
+        return response
+
+    normalized_invert = "true" if invert_signals == "true" else "false"
+    _update_env_values(
+        {
+            "TRADING_SYMBOLS": normalized_symbols,
+            "INVERT_SIGNALS": normalized_invert,
+        }
+    )
+    _reload_runtime_settings()
+    if user:
+        auth_store.log_event(
+            "settings_updated",
+            success=True,
+            username=user.username,
+            details={
+                "TRADING_SYMBOLS": normalized_symbols,
+                "INVERT_SIGNALS": normalized_invert,
+            },
+        )
+    response = _json_response(
+        {
+            "ok": True,
+            "message": "Settings saved. The new values will be used on the next bot start.",
+            "symbols": SETTINGS.symbols,
+            "invert_signals": SETTINGS.invert_signals,
+        }
+    )
+    if user:
+        _set_session_cookie(response, user, session_expiry(SETTINGS))
+    return response
 
 
 @app.get("/api/control_snapshot")
