@@ -14,6 +14,7 @@
       --text: #f8fafc;
       --muted: #9fb3cf;
       --accent: #5eead4;
+      --accent-strong: #2dd4bf;
       --good: #4ade80;
       --bad: #fb7185;
       --warn: #fbbf24;
@@ -66,14 +67,37 @@
       text-decoration: none;
       cursor: pointer;
       font-size: 0.95rem;
+      font-weight: 600;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
     }
     .nav a.active {
       border-color: rgba(94, 234, 212, 0.45);
       background: rgba(20, 184, 166, 0.18);
       color: var(--accent);
     }
-    button.primary { background: rgba(20, 184, 166, 0.18); border-color: rgba(94, 234, 212, 0.45); color: var(--accent); }
-    button.danger { color: #fecdd3; border-color: rgba(251, 113, 133, 0.35); background: rgba(127, 29, 29, 0.26); }
+    .nav a:hover, button:hover, .logout button:hover {
+      border-color: rgba(159, 179, 207, 0.42);
+      box-shadow: 0 12px 22px rgba(0, 0, 0, 0.24);
+    }
+    .nav a:active, button:active, .logout button:active {
+      transform: translateY(2px) scale(0.985);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.26);
+    }
+    button.primary {
+      background: linear-gradient(180deg, rgba(45, 212, 191, 0.2), rgba(20, 184, 166, 0.12));
+      border-color: rgba(94, 234, 212, 0.45);
+      color: var(--accent);
+    }
+    button.primary:hover {
+      border-color: rgba(94, 234, 212, 0.68);
+      background: linear-gradient(180deg, rgba(45, 212, 191, 0.28), rgba(20, 184, 166, 0.16));
+    }
+    button.danger {
+      color: #fecdd3;
+      border-color: rgba(251, 113, 133, 0.35);
+      background: linear-gradient(180deg, rgba(127, 29, 29, 0.34), rgba(127, 29, 29, 0.22));
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -95,15 +119,35 @@
     .panel h2 { margin: 0 0 12px; font-size: 1.05rem; }
     .meta {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+    }
+    .meta-card {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(24, 36, 59, 0.9);
+      border: 1px solid rgba(110, 129, 172, 0.18);
+      min-height: 78px;
+    }
+    .meta-card .meta-label {
       color: var(--muted);
-      font-size: 0.95rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .meta-card .meta-value {
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
     .status-line {
       margin-top: 10px;
       min-height: 24px;
       color: var(--muted);
+      font-size: 0.96rem;
     }
     table {
       width: 100%;
@@ -173,6 +217,57 @@
       font-size: 0.85rem;
     }
     .logout { margin: 0; }
+    .symbols-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .symbol-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(94, 234, 212, 0.2);
+      background: rgba(45, 212, 191, 0.08);
+      color: #d6fffa;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .table-action {
+      padding: 8px 10px;
+      font-size: 0.84rem;
+      border-radius: 10px;
+    }
+    .switch {
+      appearance: none;
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(110, 129, 172, 0.28);
+      border: 1px solid rgba(110, 129, 172, 0.35);
+      position: relative;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 4px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 120ms ease;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.28);
+    }
+    .switch:checked {
+      background: rgba(45, 212, 191, 0.36);
+      border-color: rgba(94, 234, 212, 0.5);
+    }
+    .switch:checked::after {
+      transform: translateX(19px);
+    }
     @media (max-width: 720px) {
       .shell { width: min(100%, calc(100% - 16px)); margin: 8px auto 18px; }
       .topbar, .panel, .stat { border-radius: 16px; }
@@ -210,10 +305,26 @@
         <span id="action-status" class="status-line"></span>
       </div>
       <div class="meta">
-        <div>Mode: <strong>{{ "Paper" if settings.paper_trading else "Live" }}</strong></div>
-        <div>Category: <strong>{{ settings.category }}</strong></div>
-        <div>Symbols: <strong>{{ ", ".join(settings.symbols) }}</strong></div>
-        <div>Backtest Filter: <strong>{{ "On" if settings.filter_symbols_by_backtest else "Off" }}</strong></div>
+        <div class="meta-card">
+          <div class="meta-label">Mode</div>
+          <div class="meta-value">{{ "Paper" if settings.paper_trading else "Live" }}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Category</div>
+          <div class="meta-value">{{ settings.category }}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Trading Symbols</div>
+          <div class="meta-value symbols-list">
+            {% for symbol in settings.symbols %}
+            <span class="symbol-chip">{{ symbol }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Backtest Filter</div>
+          <div class="meta-value">{{ "On" if settings.filter_symbols_by_backtest else "Off" }}</div>
+        </div>
       </div>
     </section>
 
@@ -225,7 +336,7 @@
           <input id="trading-symbols" name="trading_symbols" type="text" value="{{ ','.join(settings.symbols) }}" placeholder="BTCUSDT,ETHUSDT">
         </div>
         <label class="checkbox-row" for="invert-signals">
-          <input id="invert-signals" name="invert_signals" type="checkbox" {% if settings.invert_signals %}checked{% endif %}>
+          <input id="invert-signals" class="switch" name="invert_signals" type="checkbox" {% if settings.invert_signals %}checked{% endif %}>
           <span>Invert Signals</span>
         </label>
         <div class="settings-row">
@@ -313,6 +424,24 @@
       return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     }
 
+    function renderPositionsTable(rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="status-line">No open positions.</div>`;
+      }
+      const columns = ["symbol", "side", "qty", "entry_price", "unrealized_pnl", "opened_at", "action"];
+      const head = columns.map((column) => `<th>${column}</th>`).join("");
+      const body = rows.map((row) => {
+        const cells = columns.map((column) => {
+          if (column === "action") {
+            return `<td><button class="danger table-action close-position-btn" type="button" data-symbol="${row.symbol}">Close Position</button></td>`;
+          }
+          return `<td>${row[column] ?? ""}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
     function renderStats(snapshot) {
       if (view === "control") {
         statsEl.innerHTML = [
@@ -338,12 +467,16 @@
         renderStatCard("Realized PnL", formatMoney(snapshot.realized_pnl), toneClass(snapshot.realized_pnl)),
         renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
       ].join("");
-      positionsEl.innerHTML = renderTable(snapshot.open_positions);
+      positionsEl.innerHTML = renderPositionsTable(snapshot.open_positions);
       tradesEl.innerHTML = renderTable(snapshot.recent_trades);
       filterEl.innerHTML = renderTable(snapshot.symbol_filter_results);
       actionStatusEl.textContent = snapshot.last_error
         ? `Last error: ${snapshot.last_error}`
         : `Last update: ${snapshot.last_update}`;
+
+      document.querySelectorAll(".close-position-btn").forEach((button) => {
+        button.addEventListener("click", () => closePosition(button.dataset.symbol));
+      });
     }
 
     async function loadSnapshot() {
@@ -362,6 +495,7 @@
     }
 
     async function postAction(endpoint) {
+      actionStatusEl.textContent = endpoint.endsWith("/start") ? "Starting bot..." : "Stopping bot...";
       const response = await fetch(endpoint, { method: "POST", credentials: "same-origin" });
       const payload = await response.json();
       actionStatusEl.textContent = payload.error || payload.status || "Done.";
@@ -387,6 +521,22 @@
       }
       backtestResultEl.textContent =
         `${payload.symbol}: Return ${payload.total_return_pct}% | Trades ${payload.trades} | Win ${payload.win_rate_pct}% | PF ${payload.profit_factor}`;
+    }
+
+    async function closePosition(symbol) {
+      actionStatusEl.textContent = `Closing ${symbol}...`;
+      const formData = new FormData();
+      formData.append("symbol", symbol);
+      const response = await fetch("/api/close_position", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin"
+      });
+      const payload = await response.json();
+      actionStatusEl.textContent = payload.error || `${symbol} closed at ${payload.price}`;
+      if (response.ok) {
+        await loadSnapshot();
+      }
     }
 
     async function saveSettings(event) {

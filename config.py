@@ -58,7 +58,19 @@ class Settings:
     trend_ema: int = field(default_factory=lambda: int(os.getenv("TREND_EMA", "200")))
     atr_period: int = field(default_factory=lambda: int(os.getenv("ATR_PERIOD", "14")))
     atr_min_pct: float = field(default_factory=lambda: float(os.getenv("ATR_MIN_PCT", "0.003")))
-    signal_score_threshold: int = field(default_factory=lambda: int(os.getenv("SIGNAL_SCORE_THRESHOLD", "3")))
+    adx_period: int = field(default_factory=lambda: int(os.getenv("ADX_PERIOD", "14")))
+    min_adx: float = field(default_factory=lambda: float(os.getenv("MIN_ADX", "18")))
+    volume_ma_period: int = field(default_factory=lambda: int(os.getenv("VOLUME_MA_PERIOD", "20")))
+    min_volume_ratio: float = field(default_factory=lambda: float(os.getenv("MIN_VOLUME_RATIO", "1.05")))
+    breakout_lookback: int = field(default_factory=lambda: int(os.getenv("BREAKOUT_LOOKBACK", "20")))
+    min_trend_strength_pct: float = field(default_factory=lambda: float(os.getenv("MIN_TREND_STRENGTH_PCT", "0.0015")))
+    signal_score_threshold: int = field(default_factory=lambda: int(os.getenv("SIGNAL_SCORE_THRESHOLD", "4")))
+    extreme_entry_mode: bool = field(default_factory=lambda: os.getenv("EXTREME_ENTRY_MODE", "true").lower() == "true")
+    min_expected_move_pct: float = field(default_factory=lambda: float(os.getenv("MIN_EXPECTED_MOVE_PCT", "0.02")))
+    min_signal_confidence: float = field(default_factory=lambda: float(os.getenv("MIN_SIGNAL_CONFIDENCE", "0.8")))
+    require_breakout_confirmation: bool = field(
+        default_factory=lambda: os.getenv("REQUIRE_BREAKOUT_CONFIRMATION", "true").lower() == "true"
+    )
     cooldown_bars: int = field(default_factory=lambda: int(os.getenv("COOLDOWN_BARS", "4")))
     fee_rate: float = field(default_factory=lambda: float(os.getenv("FEE_RATE", "0.0006")))
     invert_signals: bool = field(default_factory=lambda: os.getenv("INVERT_SIGNALS", "false").lower() == "true")
@@ -94,8 +106,24 @@ class Settings:
             raise ValueError("STOP_LOSS_PCT and TAKE_PROFIT_PCT must be positive.")
         if not self.symbols:
             raise ValueError("At least one symbol must be configured in TRADING_SYMBOLS.")
-        if self.signal_score_threshold < 2 or self.signal_score_threshold > 4:
-            raise ValueError("SIGNAL_SCORE_THRESHOLD must be between 2 and 4.")
+        if self.signal_score_threshold < 2 or self.signal_score_threshold > 6:
+            raise ValueError("SIGNAL_SCORE_THRESHOLD must be between 2 and 6.")
+        if self.adx_period < 2:
+            raise ValueError("ADX_PERIOD must be at least 2.")
+        if self.min_adx < 0:
+            raise ValueError("MIN_ADX must be non-negative.")
+        if self.volume_ma_period < 2:
+            raise ValueError("VOLUME_MA_PERIOD must be at least 2.")
+        if self.min_volume_ratio <= 0:
+            raise ValueError("MIN_VOLUME_RATIO must be positive.")
+        if self.breakout_lookback < 2:
+            raise ValueError("BREAKOUT_LOOKBACK must be at least 2.")
+        if self.min_trend_strength_pct < 0:
+            raise ValueError("MIN_TREND_STRENGTH_PCT must be non-negative.")
+        if self.min_expected_move_pct < 0:
+            raise ValueError("MIN_EXPECTED_MOVE_PCT must be non-negative.")
+        if self.min_signal_confidence < 0 or self.min_signal_confidence > 1:
+            raise ValueError("MIN_SIGNAL_CONFIDENCE must be between 0 and 1.")
         if self.cooldown_bars < 0:
             raise ValueError("COOLDOWN_BARS must be non-negative.")
         if self.fee_rate < 0 or self.fee_rate > 0.01:

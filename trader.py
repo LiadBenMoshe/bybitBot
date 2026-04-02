@@ -35,7 +35,17 @@ class TraderEngine:
                 macd_signal=settings.macd_signal,
                 atr_period=settings.atr_period,
                 atr_min_pct=settings.atr_min_pct,
+                adx_period=settings.adx_period,
+                min_adx=settings.min_adx,
+                volume_ma_period=settings.volume_ma_period,
+                min_volume_ratio=settings.min_volume_ratio,
+                breakout_lookback=settings.breakout_lookback,
+                min_trend_strength_pct=settings.min_trend_strength_pct,
                 signal_score_threshold=settings.signal_score_threshold,
+                extreme_entry_mode=settings.extreme_entry_mode,
+                min_expected_move_pct=settings.min_expected_move_pct,
+                min_signal_confidence=settings.min_signal_confidence,
+                require_breakout_confirmation=settings.require_breakout_confirmation,
             )
         )
         self.market_data = MarketDataStream(
@@ -320,6 +330,28 @@ class TraderEngine:
                 self.cash_balance = self.client.get_wallet_balance()
         except Exception as exc:
             self.logger.debug("Position refresh skipped: %s", exc)
+
+    def close_open_position(self, symbol: str, reason: str = "Manual close") -> dict[str, Any]:
+        normalized_symbol = symbol.strip().upper()
+        with self.lock:
+            position = self.positions.get(normalized_symbol)
+            if not position:
+                raise ValueError(f"No open position for {normalized_symbol}.")
+            frame = self.market_history.get(normalized_symbol, pd.DataFrame())
+            if not frame.empty and "close" in frame.columns:
+                market_price = float(frame.iloc[-1]["close"])
+            else:
+                latest_frame = self.client.get_kline(self.settings.category, normalized_symbol, self.settings.timeframe, limit=1)
+                if latest_frame.empty:
+                    raise RuntimeError(f"No market price available for {normalized_symbol}.")
+                market_price = float(latest_frame.iloc[-1]["close"])
+                self.market_history[normalized_symbol] = latest_frame
+            self._close_position(normalized_symbol, market_price, reason)
+            return {
+                "symbol": normalized_symbol,
+                "price": market_price,
+                "status": "closed",
+            }
 
     def get_snapshot(self) -> Dict[str, Any]:
         with self.lock:

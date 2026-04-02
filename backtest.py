@@ -41,7 +41,17 @@ class Backtester:
                 macd_signal=settings.macd_signal,
                 atr_period=settings.atr_period,
                 atr_min_pct=settings.atr_min_pct,
+                adx_period=settings.adx_period,
+                min_adx=settings.min_adx,
+                volume_ma_period=settings.volume_ma_period,
+                min_volume_ratio=settings.min_volume_ratio,
+                breakout_lookback=settings.breakout_lookback,
+                min_trend_strength_pct=settings.min_trend_strength_pct,
                 signal_score_threshold=settings.signal_score_threshold,
+                extreme_entry_mode=settings.extreme_entry_mode,
+                min_expected_move_pct=settings.min_expected_move_pct,
+                min_signal_confidence=settings.min_signal_confidence,
+                require_breakout_confirmation=settings.require_breakout_confirmation,
             )
         )
 

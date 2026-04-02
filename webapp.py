@@ -454,6 +454,33 @@ def stop_bot(request: Request) -> JSONResponse:
     return response
 
 
+@app.post("/api/close_position")
+def close_position(request: Request, symbol: str = Form(...)) -> JSONResponse:
+    authorized = _authorized_session(request, "stop_bot", "Close Open Position")
+    if isinstance(authorized, JSONResponse):
+        return authorized
+    user, auth_store = authorized
+    engine = get_engine()
+    try:
+        result = engine.close_open_position(symbol, reason="Manual close from web UI")
+    except ValueError as exc:
+        response = _json_response({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        response = _json_response({"error": str(exc)}, status_code=400)
+    else:
+        if user:
+            auth_store.log_event(
+                "position_closed_manual",
+                success=True,
+                username=user.username,
+                details={"symbol": result["symbol"]},
+            )
+        response = _json_response({"ok": True, **result})
+    if user:
+        _set_session_cookie(response, user, session_expiry(SETTINGS))
+    return response
+
+
 @app.post("/api/backtest")
 def run_backtest(request: Request, symbol: str = Form(...)) -> JSONResponse:
     authorized = _authorized_session(request, "run_backtest", "Run Backtest")
