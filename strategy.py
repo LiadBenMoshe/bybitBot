@@ -33,6 +33,10 @@ class StrategyConfig:
     min_expected_move_pct: float = 0.02
     min_signal_confidence: float = 0.8
     require_breakout_confirmation: bool = True
+    pullback_lookback: int = 3
+    breakout_buffer_pct: float = 0.001
+    atr_stop_multiple: float = 1.6
+    atr_target_multiple: float = 3.2
 
 
 class IndicatorStrategy:
@@ -86,6 +90,9 @@ class IndicatorStrategy:
         df["volume_ratio"] = df["volume"] / df["volume_ma"].replace(0, np.nan)
         df["breakout_high"] = df["high"].rolling(self.config.breakout_lookback).max().shift(1)
         df["breakout_low"] = df["low"].rolling(self.config.breakout_lookback).min().shift(1)
+        df["recent_low"] = df["low"].rolling(self.config.pullback_lookback).min().shift(1)
+        df["recent_high"] = df["high"].rolling(self.config.pullback_lookback).max().shift(1)
+        df["price_change_lookback"] = df["close"].pct_change(self.config.pullback_lookback)
         df["expected_move_pct"] = np.maximum(df["atr_pct"] * 2.2, df["ema_spread_pct"] * 3.2)
         return df
 
@@ -109,24 +116,35 @@ class IndicatorStrategy:
         ema_spread_pct = latest["ema_spread_pct"]
         breakout_high = latest["breakout_high"]
         breakout_low = latest["breakout_low"]
+        recent_low = latest["recent_low"]
+        recent_high = latest["recent_high"]
         expected_move_pct = latest["expected_move_pct"]
-        breakout_up = not isna(breakout_high) and latest["close"] > breakout_high
-        breakout_down = not isna(breakout_low) and latest["close"] < breakout_low
+        price_change_lookback = latest["price_change_lookback"]
+        breakout_up = not isna(breakout_high) and latest["close"] >= breakout_high * (1 + self.config.breakout_buffer_pct)
+        breakout_down = not isna(breakout_low) and latest["close"] <= breakout_low * (1 - self.config.breakout_buffer_pct)
+        trend_up = not isna(ema_fast) and not isna(ema_slow) and not isna(trend_ema) and ema_fast > ema_slow and latest["close"] > trend_ema
+        trend_down = not isna(ema_fast) and not isna(ema_slow) and not isna(trend_ema) and ema_fast < ema_slow and latest["close"] < trend_ema
+        pullback_long = (
+            trend_up
+            and not isna(recent_low)
+            and not isna(ema_fast)
+            and recent_low <= ema_fast
+            and latest["close"] > ema_fast
+        )
+        pullback_short = (
+            trend_down
+            and not isna(recent_high)
+            and not isna(ema_fast)
+            and recent_high >= ema_fast
+            and latest["close"] < ema_fast
+        )
 
-        if not isna(ema_fast) and not isna(ema_slow) and ema_fast > ema_slow:
+        if trend_up:
             long_score += 1
-            reasons.append("EMA bullish")
-        elif not isna(ema_fast) and not isna(ema_slow) and ema_fast < ema_slow:
+            reasons.append("Trend up")
+        elif trend_down:
             short_score += 1
-            reasons.append("EMA bearish")
-
-        if not isna(trend_ema):
-            if latest["close"] > trend_ema:
-                long_score += 1
-                reasons.append("Trend filter up")
-            elif latest["close"] < trend_ema:
-                short_score += 1
-                reasons.append("Trend filter down")
+            reasons.append("Trend down")
 
         if not isna(rsi) and rsi >= self.config.rsi_long_threshold:
             long_score += 1
@@ -180,11 +198,25 @@ class IndicatorStrategy:
             )
 
         if breakout_up:
-            long_score += 1
+            long_score += 2
             reasons.append("Breakout up")
         elif breakout_down:
-            short_score += 1
+            short_score += 2
             reasons.append("Breakout down")
+
+        if pullback_long:
+            long_score += 1
+            reasons.append("Pullback long")
+        elif pullback_short:
+            short_score += 1
+            reasons.append("Pullback short")
+
+        if not isna(price_change_lookback) and price_change_lookback > 0:
+            long_score += 1
+            reasons.append("Short-term momentum up")
+        elif not isna(price_change_lookback) and price_change_lookback < 0:
+            short_score += 1
+            reasons.append("Short-term momentum down")
 
         if not isna(volume_ratio) and volume_ratio >= self.config.min_volume_ratio * 1.15:
             if long_score > short_score:
@@ -196,19 +228,22 @@ class IndicatorStrategy:
 
         action = "hold"
         confidence = 0.0
+        stop_loss = None
+        take_profit = None
         if long_score >= self.config.signal_score_threshold and long_score > short_score:
             action = "buy"
-            confidence = min(long_score / 6, 1.0)
+            confidence = min(long_score / 7, 1.0)
         elif short_score >= self.config.signal_score_threshold and short_score > long_score:
             action = "sell"
-            confidence = min(short_score / 6, 1.0)
+            confidence = min(short_score / 7, 1.0)
 
         if self.config.extreme_entry_mode and action != "hold":
             breakout_confirmed = breakout_up if action == "buy" else breakout_down
-            if self.config.require_breakout_confirmation and not breakout_confirmed:
+            continuation_confirmed = breakout_confirmed or (pullback_long if action == "buy" else pullback_short)
+            if self.config.require_breakout_confirmation and not continuation_confirmed:
                 action = "hold"
                 confidence = 0.0
-                reasons.append("Extreme mode needs breakout")
+                reasons.append("Extreme mode needs continuation")
             elif isna(expected_move_pct) or expected_move_pct < self.config.min_expected_move_pct:
                 action = "hold"
                 confidence = 0.0
@@ -216,6 +251,14 @@ class IndicatorStrategy:
             elif confidence < self.config.min_signal_confidence:
                 action = "hold"
                 reasons.append("Confidence too low")
+            elif not isna(latest["atr"]) and latest["atr"] > 0:
+                atr = float(latest["atr"])
+                if action == "buy":
+                    stop_loss = float(latest["close"] - atr * self.config.atr_stop_multiple)
+                    take_profit = float(latest["close"] + atr * self.config.atr_target_multiple)
+                else:
+                    stop_loss = float(latest["close"] + atr * self.config.atr_stop_multiple)
+                    take_profit = float(latest["close"] - atr * self.config.atr_target_multiple)
 
         return Signal(
             symbol=symbol,
@@ -224,4 +267,6 @@ class IndicatorStrategy:
             timestamp=latest["timestamp"].to_pydatetime(),
             confidence=confidence,
             reason=", ".join(reasons[-4:]) or "No confluence",
+            stop_loss=stop_loss,
+            take_profit=take_profit,
         )

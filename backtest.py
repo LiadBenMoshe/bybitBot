@@ -52,6 +52,10 @@ class Backtester:
                 min_expected_move_pct=settings.min_expected_move_pct,
                 min_signal_confidence=settings.min_signal_confidence,
                 require_breakout_confirmation=settings.require_breakout_confirmation,
+                pullback_lookback=settings.pullback_lookback,
+                breakout_buffer_pct=settings.breakout_buffer_pct,
+                atr_stop_multiple=settings.atr_stop_multiple,
+                atr_target_multiple=settings.atr_target_multiple,
             )
         )
 
@@ -109,7 +113,18 @@ class Backtester:
                 if idx < cooldown_until:
                     continue
                 if action in {"buy", "sell"}:
-                    position = {"side": "long" if action == "buy" else "short", "entry": price}
+                    stop_loss = signal.stop_loss
+                    take_profit = signal.take_profit
+                    if stop_loss is None:
+                        stop_loss = price * (1 - self.settings.stop_loss_pct) if action == "buy" else price * (1 + self.settings.stop_loss_pct)
+                    if take_profit is None:
+                        take_profit = price * (1 + self.settings.take_profit_pct) if action == "buy" else price * (1 - self.settings.take_profit_pct)
+                    position = {
+                        "side": "long" if action == "buy" else "short",
+                        "entry": price,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
+                    }
                 continue
             pnl_pct = (
                 (price - position["entry"]) / position["entry"]
@@ -120,15 +135,22 @@ class Backtester:
             exit_on_flip = (position["side"] == "long" and action == "sell") or (
                 position["side"] == "short" and action == "buy"
             )
+            hit_stop = (position["side"] == "long" and price <= position["stop_loss"]) or (
+                position["side"] == "short" and price >= position["stop_loss"]
+            )
+            hit_target = (position["side"] == "long" and price >= position["take_profit"]) or (
+                position["side"] == "short" and price <= position["take_profit"]
+            )
             if (
-                pnl_pct <= -self.settings.stop_loss_pct
-                or pnl_pct >= self.settings.take_profit_pct
+                hit_stop
+                or hit_target
                 or exit_on_flip
             ):
                 trades += 1
                 wins += int(net_pnl_pct > 0)
                 multiplier = self.settings.leverage if self.settings.category != "spot" else 1
-                risk_unit = self.settings.risk_per_trade / max(self.settings.stop_loss_pct, 0.0001)
+                stop_distance_pct = abs(position["entry"] - position["stop_loss"]) / max(position["entry"], 0.0001)
+                risk_unit = self.settings.risk_per_trade / max(stop_distance_pct, 0.0001)
                 trade_return = net_pnl_pct * multiplier * risk_unit
                 trade_return = max(trade_return, -0.99)
                 equity *= 1 + trade_return

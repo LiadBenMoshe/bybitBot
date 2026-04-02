@@ -16,6 +16,8 @@ class Signal:
     timestamp: datetime
     confidence: float
     reason: str
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
 
 @dataclass(slots=True)

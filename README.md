@@ -5,7 +5,7 @@ Python 3.10+ crypto trading bot with official Bybit integration, paper/live trad
 ## Modules
 
 - `api.py` - Bybit REST/WebSocket integration with retry and rate limiting
-- `strategy.py` - EMA, RSI, and MACD based signal generation
+- `strategy.py` - regime-aware breakout and pullback continuation signal generation
 - `trader.py` - execution engine, risk controls, logging, and position handling
 - `webapp.py` - FastAPI routes, auth session handling, and HTML rendering
 - `templates/` - lightweight HTML pages for login and control/dashboard views
@@ -38,10 +38,13 @@ Edit `.env` before running. Keep `PAPER_TRADING=true` unless you intentionally w
 
 Key tuning values:
 
-- `RSI_LONG_THRESHOLD` / `RSI_SHORT_THRESHOLD` tighten entries
+- `RSI_LONG_THRESHOLD` / `RSI_SHORT_THRESHOLD` tighten continuation entries
 - `TREND_EMA` requires trading with the larger trend
 - `ATR_MIN_PCT` skips low-volatility chop
 - `SIGNAL_SCORE_THRESHOLD` controls how much indicator agreement is required
+- `PULLBACK_LOOKBACK` controls how far back the strategy looks for EMA retests
+- `BREAKOUT_BUFFER_PCT` avoids triggering on tiny false breakouts
+- `ATR_STOP_MULTIPLE` / `ATR_TARGET_MULTIPLE` size exits to market volatility
 - `COOLDOWN_BARS` pauses re-entry after a closed trade
 - `FEE_RATE` makes backtests more realistic
 - `INVERT_SIGNALS=true` flips every buy to a sell and every sell to a buy

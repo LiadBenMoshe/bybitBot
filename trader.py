@@ -46,6 +46,10 @@ class TraderEngine:
                 min_expected_move_pct=settings.min_expected_move_pct,
                 min_signal_confidence=settings.min_signal_confidence,
                 require_breakout_confirmation=settings.require_breakout_confirmation,
+                pullback_lookback=settings.pullback_lookback,
+                breakout_buffer_pct=settings.breakout_buffer_pct,
+                atr_stop_multiple=settings.atr_stop_multiple,
+                atr_target_multiple=settings.atr_target_multiple,
             )
         )
         self.market_data = MarketDataStream(
@@ -167,9 +171,12 @@ class TraderEngine:
         frame = frame.drop_duplicates(subset=["timestamp"], keep="last").sort_values("timestamp").tail(500)
         self.market_history[symbol] = frame.reset_index(drop=True)
 
-    def _calculate_position_size(self, price: float) -> float:
+    def _calculate_position_size(self, price: float, stop_loss: float | None = None) -> float:
         risk_amount = self.cash_balance * self.settings.risk_per_trade
-        stop_distance = max(price * self.settings.stop_loss_pct, 0.0001)
+        if stop_loss is not None:
+            stop_distance = max(abs(price - stop_loss), 0.0001)
+        else:
+            stop_distance = max(price * self.settings.stop_loss_pct, 0.0001)
         return round(risk_amount / stop_distance, 6)
 
     def _process_signal(self, signal: Signal) -> None:
@@ -187,10 +194,18 @@ class TraderEngine:
             if len(self.positions) >= self.settings.max_positions:
                 return
             side = "long" if action == "buy" else "short"
-            qty = self._calculate_position_size(signal.price)
+            qty = self._calculate_position_size(signal.price, signal.stop_loss)
             if qty <= 0:
                 return
-            self._open_position(signal.symbol, side, signal.price, qty, signal.reason)
+            self._open_position(
+                signal.symbol,
+                side,
+                signal.price,
+                qty,
+                signal.reason,
+                signal.stop_loss,
+                signal.take_profit,
+            )
 
     def _effective_action(self, action: str) -> str:
         if not self.settings.invert_signals:
@@ -213,9 +228,20 @@ class TraderEngine:
             minutes_per_bar = 15
         return (timestamp - last_closed).total_seconds() < self.settings.cooldown_bars * minutes_per_bar * 60
 
-    def _open_position(self, symbol: str, side: str, price: float, qty: float, reason: str) -> None:
-        stop_loss = price * (1 - self.settings.stop_loss_pct) if side == "long" else price * (1 + self.settings.stop_loss_pct)
-        take_profit = price * (1 + self.settings.take_profit_pct) if side == "long" else price * (1 - self.settings.take_profit_pct)
+    def _open_position(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        qty: float,
+        reason: str,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> None:
+        if stop_loss is None:
+            stop_loss = price * (1 - self.settings.stop_loss_pct) if side == "long" else price * (1 + self.settings.stop_loss_pct)
+        if take_profit is None:
+            take_profit = price * (1 + self.settings.take_profit_pct) if side == "long" else price * (1 - self.settings.take_profit_pct)
         order_id: Optional[str] = None
         normalized_qty = qty
         if not self.settings.paper_trading:

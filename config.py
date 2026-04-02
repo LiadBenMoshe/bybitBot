@@ -71,6 +71,10 @@ class Settings:
     require_breakout_confirmation: bool = field(
         default_factory=lambda: os.getenv("REQUIRE_BREAKOUT_CONFIRMATION", "true").lower() == "true"
     )
+    pullback_lookback: int = field(default_factory=lambda: int(os.getenv("PULLBACK_LOOKBACK", "3")))
+    breakout_buffer_pct: float = field(default_factory=lambda: float(os.getenv("BREAKOUT_BUFFER_PCT", "0.001")))
+    atr_stop_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_STOP_MULTIPLE", "1.6")))
+    atr_target_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_TARGET_MULTIPLE", "3.2")))
     cooldown_bars: int = field(default_factory=lambda: int(os.getenv("COOLDOWN_BARS", "4")))
     fee_rate: float = field(default_factory=lambda: float(os.getenv("FEE_RATE", "0.0006")))
     invert_signals: bool = field(default_factory=lambda: os.getenv("INVERT_SIGNALS", "false").lower() == "true")
@@ -124,6 +128,12 @@ class Settings:
             raise ValueError("MIN_EXPECTED_MOVE_PCT must be non-negative.")
         if self.min_signal_confidence < 0 or self.min_signal_confidence > 1:
             raise ValueError("MIN_SIGNAL_CONFIDENCE must be between 0 and 1.")
+        if self.pullback_lookback < 1:
+            raise ValueError("PULLBACK_LOOKBACK must be at least 1.")
+        if self.breakout_buffer_pct < 0:
+            raise ValueError("BREAKOUT_BUFFER_PCT must be non-negative.")
+        if self.atr_stop_multiple <= 0 or self.atr_target_multiple <= 0:
+            raise ValueError("ATR_STOP_MULTIPLE and ATR_TARGET_MULTIPLE must be positive.")
         if self.cooldown_bars < 0:
             raise ValueError("COOLDOWN_BARS must be non-negative.")
         if self.fee_rate < 0 or self.fee_rate > 0.01:
