@@ -7,7 +7,7 @@ from typing import Iterable
 
 from api import BybitClient
 from config import Settings
-from strategy import IndicatorStrategy, StrategyConfig
+from strategy import IndicatorStrategy, build_strategy_config
 
 
 @dataclass(slots=True)
@@ -28,36 +28,7 @@ class Backtester:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = BybitClient(settings.api_key, settings.api_secret, testnet=settings.testnet)
-        self.strategy = IndicatorStrategy(
-            StrategyConfig(
-                ema_fast=settings.ema_fast,
-                ema_slow=settings.ema_slow,
-                trend_ema=settings.trend_ema,
-                rsi_period=settings.rsi_period,
-                rsi_long_threshold=settings.rsi_long_threshold,
-                rsi_short_threshold=settings.rsi_short_threshold,
-                macd_fast=settings.macd_fast,
-                macd_slow=settings.macd_slow,
-                macd_signal=settings.macd_signal,
-                atr_period=settings.atr_period,
-                atr_min_pct=settings.atr_min_pct,
-                adx_period=settings.adx_period,
-                min_adx=settings.min_adx,
-                volume_ma_period=settings.volume_ma_period,
-                min_volume_ratio=settings.min_volume_ratio,
-                breakout_lookback=settings.breakout_lookback,
-                min_trend_strength_pct=settings.min_trend_strength_pct,
-                signal_score_threshold=settings.signal_score_threshold,
-                extreme_entry_mode=settings.extreme_entry_mode,
-                min_expected_move_pct=settings.min_expected_move_pct,
-                min_signal_confidence=settings.min_signal_confidence,
-                require_breakout_confirmation=settings.require_breakout_confirmation,
-                pullback_lookback=settings.pullback_lookback,
-                breakout_buffer_pct=settings.breakout_buffer_pct,
-                atr_stop_multiple=settings.atr_stop_multiple,
-                atr_target_multiple=settings.atr_target_multiple,
-            )
-        )
+        self.strategy = IndicatorStrategy(build_strategy_config(settings))
 
     def run(self, symbol: str, candles: int = 500) -> BacktestResult:
         frame = self.client.get_kline(self.settings.category, symbol, self.settings.timeframe, limit=candles)

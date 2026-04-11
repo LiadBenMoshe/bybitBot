@@ -8,9 +8,9 @@
     :root {
       color-scheme: dark;
       --bg: #08101d;
-      --panel: rgba(15, 23, 42, 0.88);
-      --panel-2: rgba(23, 35, 58, 0.92);
-      --border: rgba(110, 129, 172, 0.28);
+      --panel: rgba(15, 23, 42, 0.92);
+      --panel-2: rgba(23, 35, 58, 0.95);
+      --border: rgba(110, 129, 172, 0.22);
       --text: #f8fafc;
       --muted: #9fb3cf;
       --accent: #5eead4;
@@ -30,44 +30,47 @@
         linear-gradient(180deg, #07101d 0%, #0a1323 100%);
     }
     .shell {
-      width: min(1180px, calc(100% - 24px));
-      margin: 20px auto;
+      width: min(100%, 460px);
+      margin: 0 auto;
+      padding: 12px 12px 24px;
       display: grid;
-      gap: 16px;
+      gap: 12px;
     }
-    .topbar, .panel, .stat, table {
+    .topbar, .panel, .stat, .data-card {
       border: 1px solid var(--border);
       background: var(--panel);
       backdrop-filter: blur(10px);
       box-shadow: 0 10px 35px rgba(0, 0, 0, 0.22);
     }
     .topbar {
-      border-radius: 20px;
+      border-radius: 22px;
       padding: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
+      display: grid;
+      gap: 14px;
     }
-    .title h1 { margin: 0; font-size: 1.45rem; }
+    .title h1 { margin: 0; font-size: 1.35rem; }
     .title p { margin: 6px 0 0; color: var(--muted); }
     .actions, .nav {
-      display: flex;
+      display: grid;
       gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
+    }
+    .nav {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .nav a, button, .logout button {
-      border-radius: 12px;
+      width: 100%;
+      min-height: 48px;
+      border-radius: 14px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
-      padding: 10px 14px;
+      padding: 12px 14px;
       text-decoration: none;
       cursor: pointer;
       font-size: 0.95rem;
       font-weight: 600;
+      line-height: 1.2;
+      text-align: center;
       transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
       box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
     }
@@ -100,16 +103,16 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      grid-template-columns: 1fr 1fr;
       gap: 12px;
     }
     .stat {
       border-radius: 18px;
-      padding: 16px;
-      min-height: 106px;
+      padding: 15px;
+      min-height: 98px;
     }
     .stat .label { color: var(--muted); font-size: 0.92rem; }
-    .stat .value { margin-top: 8px; font-size: 1.6rem; font-weight: 700; }
+    .stat .value { margin-top: 8px; font-size: 1.28rem; font-weight: 700; }
     .stat.good .value { color: var(--good); }
     .stat.bad .value { color: var(--bad); }
     .panel {
@@ -119,7 +122,7 @@
     .panel h2 { margin: 0 0 12px; font-size: 1.05rem; }
     .meta {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      grid-template-columns: 1fr;
       gap: 12px;
     }
     .meta-card {
@@ -144,64 +147,64 @@
       overflow-wrap: anywhere;
     }
     .status-line {
-      margin-top: 10px;
       min-height: 24px;
       color: var(--muted);
       font-size: 0.96rem;
+      line-height: 1.45;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      border-radius: 16px;
-      overflow: hidden;
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
     }
-    th, td {
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(110, 129, 172, 0.16);
-      text-align: left;
-      font-size: 0.93rem;
+    .status-box {
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(24, 36, 59, 0.72);
+      border: 1px solid rgba(110, 129, 172, 0.18);
     }
-    th { color: var(--muted); background: rgba(15, 23, 42, 0.98); }
     .hidden { display: none; }
     .stack { display: grid; gap: 16px; }
     .inline-form {
-      display: flex;
+      display: grid;
       gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
     }
     select {
       border-radius: 12px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
-      padding: 10px 14px;
-      min-width: 180px;
+      padding: 12px 14px;
+      min-width: 0;
+      width: 100%;
     }
     input[type="text"] {
       border-radius: 12px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
-      padding: 10px 14px;
-      min-width: 220px;
-      width: min(100%, 360px);
+      padding: 12px 14px;
+      min-width: 0;
+      width: 100%;
     }
     .settings-form {
       display: grid;
       gap: 12px;
     }
     .settings-row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
+      display: grid;
+      gap: 8px;
     }
     .checkbox-row {
       display: flex;
       gap: 10px;
       align-items: center;
       color: var(--muted);
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(24, 36, 59, 0.72);
+      border: 1px solid rgba(110, 129, 172, 0.18);
     }
     .note {
       color: var(--muted);
@@ -225,7 +228,7 @@
     .symbol-chip {
       display: inline-flex;
       align-items: center;
-      padding: 5px 9px;
+      padding: 7px 10px;
       border-radius: 999px;
       border: 1px solid rgba(94, 234, 212, 0.2);
       background: rgba(45, 212, 191, 0.08);
@@ -234,9 +237,57 @@
       font-weight: 700;
     }
     .table-action {
-      padding: 8px 10px;
-      font-size: 0.84rem;
-      border-radius: 10px;
+      min-height: 42px;
+      padding: 10px 12px;
+      font-size: 0.88rem;
+      border-radius: 12px;
+    }
+    .data-list {
+      display: grid;
+      gap: 10px;
+    }
+    .data-card {
+      border-radius: 16px;
+      padding: 14px;
+    }
+    .data-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .data-card-title {
+      font-size: 0.98rem;
+      font-weight: 700;
+    }
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .data-item {
+      padding: 10px 11px;
+      border-radius: 12px;
+      background: rgba(24, 36, 59, 0.72);
+      border: 1px solid rgba(110, 129, 172, 0.14);
+      min-width: 0;
+    }
+    .data-item.wide {
+      grid-column: 1 / -1;
+    }
+    .data-key {
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .data-value {
+      font-size: 0.92rem;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+      line-height: 1.4;
     }
     .switch {
       appearance: none;
@@ -268,12 +319,10 @@
     .switch:checked::after {
       transform: translateX(19px);
     }
-    @media (max-width: 720px) {
-      .shell { width: min(100%, calc(100% - 16px)); margin: 8px auto 18px; }
-      .topbar, .panel, .stat { border-radius: 16px; }
-      .topbar { padding: 14px; }
-      .stat .value { font-size: 1.35rem; }
-      th, td { padding: 9px 10px; font-size: 0.88rem; }
+    @media (max-width: 360px) {
+      .grid, .data-grid, .button-row, .nav {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -299,11 +348,11 @@
     </section>
 
     <section class="panel">
-      <div class="inline-form">
+      <div class="button-row">
         <button id="start-btn" class="primary" type="button">Start Bot</button>
         <button id="stop-btn" class="danger" type="button">Stop Bot</button>
-        <span id="action-status" class="status-line"></span>
       </div>
+      <div id="action-status" class="status-box status-line"></div>
       <div class="meta">
         <div class="meta-card">
           <div class="meta-label">Mode</div>
@@ -341,9 +390,9 @@
         </label>
         <div class="settings-row">
           <button id="save-settings-btn" class="primary" type="submit">Save Settings</button>
-          <span id="settings-status" class="status-line"></span>
         </div>
       </form>
+      <div id="settings-status" class="status-box status-line"></div>
       <div class="note">These changes update <code>.env</code> and are applied on the next bot start. The bot must be stopped first.</div>
     </section>
 
@@ -375,7 +424,7 @@
           </select>
           <button id="backtest-btn" class="primary" type="button">Run Backtest</button>
         </div>
-        <div id="backtest-result" class="status-line"></div>
+        <div id="backtest-result" class="status-box status-line"></div>
       </section>
     </section>
   </main>
@@ -411,35 +460,68 @@
       return `${Number(value).toFixed(2)} USDT`;
     }
 
-    function renderTable(rows) {
+    function formatLabel(key) {
+      return String(key)
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    function renderTable(rows, titleKey = null) {
       if (!rows || rows.length === 0) {
         return `<div class="status-line">No data yet.</div>`;
       }
-      const columns = Object.keys(rows[0]);
-      const head = columns.map((column) => `<th>${column}</th>`).join("");
-      const body = rows.map((row) => {
-        const cells = columns.map((column) => `<td>${row[column] ?? ""}</td>`).join("");
-        return `<tr>${cells}</tr>`;
-      }).join("");
-      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      return `<div class="data-list">${rows.map((row) => {
+        const columns = Object.keys(row);
+        const titleColumn = titleKey && row[titleKey] ? titleKey : columns[0];
+        const titleValue = row[titleColumn] ?? "Item";
+        const items = columns
+          .filter((column) => column !== titleColumn)
+          .map((column) => {
+            const wide = String(row[column] ?? "").length > 40 ? " wide" : "";
+            return `
+              <div class="data-item${wide}">
+                <div class="data-key">${formatLabel(column)}</div>
+                <div class="data-value">${row[column] ?? ""}</div>
+              </div>
+            `;
+          })
+          .join("");
+        return `
+          <article class="data-card">
+            <div class="data-card-head">
+              <div class="data-card-title">${titleValue}</div>
+            </div>
+            <div class="data-grid">${items}</div>
+          </article>
+        `;
+      }).join("")}</div>`;
     }
 
     function renderPositionsTable(rows) {
       if (!rows || rows.length === 0) {
         return `<div class="status-line">No open positions.</div>`;
       }
-      const columns = ["symbol", "side", "qty", "entry_price", "unrealized_pnl", "opened_at", "action"];
-      const head = columns.map((column) => `<th>${column}</th>`).join("");
-      const body = rows.map((row) => {
-        const cells = columns.map((column) => {
-          if (column === "action") {
-            return `<td><button class="danger table-action close-position-btn" type="button" data-symbol="${row.symbol}">Close Position</button></td>`;
-          }
-          return `<td>${row[column] ?? ""}</td>`;
+      return `<div class="data-list">${rows.map((row) => {
+        const fields = ["side", "qty", "entry_price", "stop_loss", "take_profit", "unrealized_pnl", "opened_at"];
+        const items = fields.map((column) => {
+          const wide = column === "opened_at" ? " wide" : "";
+          return `
+            <div class="data-item${wide}">
+              <div class="data-key">${formatLabel(column)}</div>
+              <div class="data-value">${row[column] ?? ""}</div>
+            </div>
+          `;
         }).join("");
-        return `<tr>${cells}</tr>`;
-      }).join("");
-      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        return `
+          <article class="data-card">
+            <div class="data-card-head">
+              <div class="data-card-title">${row.symbol}</div>
+              <button class="danger table-action close-position-btn" type="button" data-symbol="${row.symbol}">Close</button>
+            </div>
+            <div class="data-grid">${items}</div>
+          </article>
+        `;
+      }).join("")}</div>`;
     }
 
     function renderStats(snapshot) {
@@ -468,8 +550,8 @@
         renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
       ].join("");
       positionsEl.innerHTML = renderPositionsTable(snapshot.open_positions);
-      tradesEl.innerHTML = renderTable(snapshot.recent_trades);
-      filterEl.innerHTML = renderTable(snapshot.symbol_filter_results);
+      tradesEl.innerHTML = renderTable(snapshot.recent_trades, "symbol");
+      filterEl.innerHTML = renderTable(snapshot.symbol_filter_results, "symbol");
       actionStatusEl.textContent = snapshot.last_error
         ? `Last error: ${snapshot.last_error}`
         : `Last update: ${snapshot.last_update}`;

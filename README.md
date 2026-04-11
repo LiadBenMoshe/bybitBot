@@ -5,7 +5,7 @@ Python 3.10+ crypto trading bot with official Bybit integration, paper/live trad
 ## Modules
 
 - `api.py` - Bybit REST/WebSocket integration with retry and rate limiting
-- `strategy.py` - regime-aware breakout and pullback continuation signal generation
+- `strategy.py` - intraday trend, breakout, and pullback signal generation for 5m/15m trading
 - `trader.py` - execution engine, risk controls, logging, and position handling
 - `webapp.py` - FastAPI routes, auth session handling, and HTML rendering
 - `templates/` - lightweight HTML pages for login and control/dashboard views
@@ -18,7 +18,7 @@ Python 3.10+ crypto trading bot with official Bybit integration, paper/live trad
 - Long and short trading
 - Leverage configuration for derivatives
 - Stop-loss, take-profit, and risk-based position sizing
-- Trend filter, ATR filter, and cooldown between trades
+- Trend, volatility, volume, and range filters tuned for intraday trading
 - WebSocket market data with polling fallback
 - Paper trading mode
 - Multiple symbols
@@ -38,11 +38,13 @@ Edit `.env` before running. Keep `PAPER_TRADING=true` unless you intentionally w
 
 Key tuning values:
 
-- `RSI_LONG_THRESHOLD` / `RSI_SHORT_THRESHOLD` tighten continuation entries
-- `TREND_EMA` requires trading with the larger trend
+- `TIMEFRAME=5` or `TIMEFRAME=15` switches the bot to 5-minute or 15-minute closed candles
+- `EMA_FAST`, `EMA_SLOW`, and `TREND_EMA` control the intraday trend structure
+- `RSI_LONG_THRESHOLD`, `RSI_SHORT_THRESHOLD`, `MAX_RSI_LONG`, and `MIN_RSI_SHORT` keep entries out of exhausted moves
 - `ATR_MIN_PCT` skips low-volatility chop
 - `SIGNAL_SCORE_THRESHOLD` controls how much indicator agreement is required
-- `PULLBACK_LOOKBACK` controls how far back the strategy looks for EMA retests
+- `PULLBACK_LOOKBACK` and `EMA_RETEST_TOLERANCE_PCT` control EMA retest entries
+- `MIN_VOLUME_RATIO`, `MIN_RANGE_WIDTH_PCT`, and `MIN_BODY_TO_RANGE_RATIO` filter low-quality breakouts
 - `BREAKOUT_BUFFER_PCT` avoids triggering on tiny false breakouts
 - `ATR_STOP_MULTIPLE` / `ATR_TARGET_MULTIPLE` size exits to market volatility
 - `COOLDOWN_BARS` pauses re-entry after a closed trade
@@ -112,5 +114,6 @@ Auth audit logs are written to `logs/auth_audit.jsonl` by default.
 ## Safety Notes
 
 - Start in testnet and paper mode.
+- Prefer `TIMEFRAME=15` first, then try `TIMEFRAME=5` only after checking backtest quality and trade frequency.
 - Confirm symbol, category, and leverage settings before live use.
 - Review exchange precision and minimum order constraints for your chosen markets.

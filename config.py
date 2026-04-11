@@ -47,35 +47,43 @@ class Settings:
     dashboard_refresh_seconds: int = field(default_factory=lambda: int(os.getenv("DASHBOARD_REFRESH_SECONDS", "6")))
     control_refresh_seconds: int = field(default_factory=lambda: int(os.getenv("CONTROL_REFRESH_SECONDS", "10")))
     mobile_default_view: bool = field(default_factory=lambda: os.getenv("MOBILE_DEFAULT_VIEW", "true").lower() == "true")
-    ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "12")))
-    ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "26")))
+    ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "9")))
+    ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "21")))
     rsi_period: int = field(default_factory=lambda: int(os.getenv("RSI_PERIOD", "14")))
-    rsi_long_threshold: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_THRESHOLD", "55")))
-    rsi_short_threshold: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_THRESHOLD", "45")))
+    rsi_long_threshold: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_THRESHOLD", "52")))
+    rsi_short_threshold: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_THRESHOLD", "48")))
     macd_fast: int = field(default_factory=lambda: int(os.getenv("MACD_FAST", "12")))
     macd_slow: int = field(default_factory=lambda: int(os.getenv("MACD_SLOW", "26")))
     macd_signal: int = field(default_factory=lambda: int(os.getenv("MACD_SIGNAL", "9")))
-    trend_ema: int = field(default_factory=lambda: int(os.getenv("TREND_EMA", "200")))
+    trend_ema: int = field(default_factory=lambda: int(os.getenv("TREND_EMA", "50")))
     atr_period: int = field(default_factory=lambda: int(os.getenv("ATR_PERIOD", "14")))
-    atr_min_pct: float = field(default_factory=lambda: float(os.getenv("ATR_MIN_PCT", "0.003")))
+    atr_min_pct: float = field(default_factory=lambda: float(os.getenv("ATR_MIN_PCT", "0.002")))
     adx_period: int = field(default_factory=lambda: int(os.getenv("ADX_PERIOD", "14")))
-    min_adx: float = field(default_factory=lambda: float(os.getenv("MIN_ADX", "18")))
+    min_adx: float = field(default_factory=lambda: float(os.getenv("MIN_ADX", "20")))
     volume_ma_period: int = field(default_factory=lambda: int(os.getenv("VOLUME_MA_PERIOD", "20")))
-    min_volume_ratio: float = field(default_factory=lambda: float(os.getenv("MIN_VOLUME_RATIO", "1.05")))
-    breakout_lookback: int = field(default_factory=lambda: int(os.getenv("BREAKOUT_LOOKBACK", "20")))
-    min_trend_strength_pct: float = field(default_factory=lambda: float(os.getenv("MIN_TREND_STRENGTH_PCT", "0.0015")))
-    signal_score_threshold: int = field(default_factory=lambda: int(os.getenv("SIGNAL_SCORE_THRESHOLD", "4")))
+    min_volume_ratio: float = field(default_factory=lambda: float(os.getenv("MIN_VOLUME_RATIO", "1.1")))
+    breakout_lookback: int = field(default_factory=lambda: int(os.getenv("BREAKOUT_LOOKBACK", "12")))
+    min_trend_strength_pct: float = field(default_factory=lambda: float(os.getenv("MIN_TREND_STRENGTH_PCT", "0.001")))
+    signal_score_threshold: int = field(default_factory=lambda: int(os.getenv("SIGNAL_SCORE_THRESHOLD", "5")))
     extreme_entry_mode: bool = field(default_factory=lambda: os.getenv("EXTREME_ENTRY_MODE", "true").lower() == "true")
-    min_expected_move_pct: float = field(default_factory=lambda: float(os.getenv("MIN_EXPECTED_MOVE_PCT", "0.02")))
-    min_signal_confidence: float = field(default_factory=lambda: float(os.getenv("MIN_SIGNAL_CONFIDENCE", "0.8")))
+    min_expected_move_pct: float = field(default_factory=lambda: float(os.getenv("MIN_EXPECTED_MOVE_PCT", "0.008")))
+    min_signal_confidence: float = field(default_factory=lambda: float(os.getenv("MIN_SIGNAL_CONFIDENCE", "0.65")))
     require_breakout_confirmation: bool = field(
         default_factory=lambda: os.getenv("REQUIRE_BREAKOUT_CONFIRMATION", "true").lower() == "true"
     )
-    pullback_lookback: int = field(default_factory=lambda: int(os.getenv("PULLBACK_LOOKBACK", "3")))
-    breakout_buffer_pct: float = field(default_factory=lambda: float(os.getenv("BREAKOUT_BUFFER_PCT", "0.001")))
-    atr_stop_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_STOP_MULTIPLE", "1.6")))
-    atr_target_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_TARGET_MULTIPLE", "3.2")))
-    cooldown_bars: int = field(default_factory=lambda: int(os.getenv("COOLDOWN_BARS", "4")))
+    pullback_lookback: int = field(default_factory=lambda: int(os.getenv("PULLBACK_LOOKBACK", "4")))
+    breakout_buffer_pct: float = field(default_factory=lambda: float(os.getenv("BREAKOUT_BUFFER_PCT", "0.0008")))
+    atr_stop_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_STOP_MULTIPLE", "1.2")))
+    atr_target_multiple: float = field(default_factory=lambda: float(os.getenv("ATR_TARGET_MULTIPLE", "2.2")))
+    max_rsi_long: float = field(default_factory=lambda: float(os.getenv("MAX_RSI_LONG", "72")))
+    min_rsi_short: float = field(default_factory=lambda: float(os.getenv("MIN_RSI_SHORT", "28")))
+    min_body_to_range_ratio: float = field(default_factory=lambda: float(os.getenv("MIN_BODY_TO_RANGE_RATIO", "0.45")))
+    min_range_width_pct: float = field(default_factory=lambda: float(os.getenv("MIN_RANGE_WIDTH_PCT", "0.004")))
+    ema_retest_tolerance_pct: float = field(default_factory=lambda: float(os.getenv("EMA_RETEST_TOLERANCE_PCT", "0.0025")))
+    require_macd_hist_improving: bool = field(
+        default_factory=lambda: os.getenv("REQUIRE_MACD_HIST_IMPROVING", "true").lower() == "true"
+    )
+    cooldown_bars: int = field(default_factory=lambda: int(os.getenv("COOLDOWN_BARS", "2")))
     fee_rate: float = field(default_factory=lambda: float(os.getenv("FEE_RATE", "0.0006")))
     invert_signals: bool = field(default_factory=lambda: os.getenv("INVERT_SIGNALS", "false").lower() == "true")
     filter_symbols_by_backtest: bool = field(
@@ -110,8 +118,10 @@ class Settings:
             raise ValueError("STOP_LOSS_PCT and TAKE_PROFIT_PCT must be positive.")
         if not self.symbols:
             raise ValueError("At least one symbol must be configured in TRADING_SYMBOLS.")
-        if self.signal_score_threshold < 2 or self.signal_score_threshold > 6:
-            raise ValueError("SIGNAL_SCORE_THRESHOLD must be between 2 and 6.")
+        if self.timeframe not in {"5", "15", "30", "60", "240", "D"}:
+            raise ValueError("TIMEFRAME must be one of 5, 15, 30, 60, 240, or D.")
+        if self.signal_score_threshold < 3 or self.signal_score_threshold > 8:
+            raise ValueError("SIGNAL_SCORE_THRESHOLD must be between 3 and 8.")
         if self.adx_period < 2:
             raise ValueError("ADX_PERIOD must be at least 2.")
         if self.min_adx < 0:
@@ -134,6 +144,16 @@ class Settings:
             raise ValueError("BREAKOUT_BUFFER_PCT must be non-negative.")
         if self.atr_stop_multiple <= 0 or self.atr_target_multiple <= 0:
             raise ValueError("ATR_STOP_MULTIPLE and ATR_TARGET_MULTIPLE must be positive.")
+        if self.max_rsi_long <= self.rsi_long_threshold or self.max_rsi_long > 100:
+            raise ValueError("MAX_RSI_LONG must be greater than RSI_LONG_THRESHOLD and at most 100.")
+        if self.min_rsi_short < 0 or self.min_rsi_short >= self.rsi_short_threshold:
+            raise ValueError("MIN_RSI_SHORT must be non-negative and below RSI_SHORT_THRESHOLD.")
+        if self.min_body_to_range_ratio <= 0 or self.min_body_to_range_ratio > 1:
+            raise ValueError("MIN_BODY_TO_RANGE_RATIO must be between 0 and 1.")
+        if self.min_range_width_pct < 0:
+            raise ValueError("MIN_RANGE_WIDTH_PCT must be non-negative.")
+        if self.ema_retest_tolerance_pct < 0:
+            raise ValueError("EMA_RETEST_TOLERANCE_PCT must be non-negative.")
         if self.cooldown_bars < 0:
             raise ValueError("COOLDOWN_BARS must be non-negative.")
         if self.fee_rate < 0 or self.fee_rate > 0.01:
