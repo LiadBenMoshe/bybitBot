@@ -32,6 +32,9 @@ class Position:
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     exchange_order_id: Optional[str] = None
     unrealized_pnl: float = 0.0
+    peak_price: float = 0.0
+    trough_price: float = 0.0
+    break_even_armed: bool = False
 
 
 @dataclass(slots=True)

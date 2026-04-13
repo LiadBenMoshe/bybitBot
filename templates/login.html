@@ -7,23 +7,30 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #09111f;
-      --panel: #121d31;
-      --panel-2: #17233a;
-      --border: #31405f;
-      --text: #f4f7fb;
-      --muted: #9db0cb;
-      --accent: #5eead4;
+      --bg: #050505;
+      --panel: #121316;
+      --panel-2: #1f2126;
+      --border: #8c6a28;
+      --text: #f5ecd7;
+      --muted: #c4ae7d;
+      --accent: #d7aa43;
       --danger: #fb7185;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Segoe UI", Tahoma, sans-serif;
+      font-family: "Courier New", "Lucida Console", monospace;
       background:
-        radial-gradient(circle at top, rgba(94, 234, 212, 0.12), transparent 32%),
-        linear-gradient(180deg, #0a1323 0%, var(--bg) 100%);
+        radial-gradient(circle at top, rgba(214, 174, 72, 0.14), transparent 32%),
+        repeating-linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.014) 0,
+          rgba(255, 255, 255, 0.014) 1px,
+          transparent 1px,
+          transparent 4px
+        ),
+        linear-gradient(180deg, #0f1012 0%, var(--bg) 100%);
       color: var(--text);
       display: grid;
       place-items: center;
@@ -31,34 +38,45 @@
     }
     .card {
       width: min(100%, 430px);
-      background: rgba(18, 29, 49, 0.95);
+      background: rgba(18, 19, 22, 0.97);
       border: 1px solid var(--border);
-      border-radius: 22px;
+      border-radius: 8px;
       padding: 24px;
-      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 217, 120, 0.05);
     }
-    h1 { margin: 0 0 10px; font-size: 1.7rem; }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 1.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-shadow: 0 0 12px rgba(255, 217, 120, 0.2);
+    }
+    p, label, input, button, .error, .hint, .setup, code {
+      font-family: "Courier New", "Lucida Console", monospace;
+      letter-spacing: 0.03em;
+    }
     p { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
     form { display: grid; gap: 12px; }
     label { display: grid; gap: 6px; font-size: 0.95rem; }
     input {
       width: 100%;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 8px;
       background: var(--panel-2);
       color: var(--text);
       padding: 12px 14px;
       font-size: 1rem;
     }
     button {
-      border: 0;
-      border-radius: 12px;
-      background: var(--accent);
-      color: #08211f;
+      border: 1px solid rgba(255, 232, 168, 0.58);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255, 213, 102, 0.98), rgba(208, 149, 33, 0.98));
+      color: #1a1304;
       font-weight: 700;
       padding: 12px 14px;
       font-size: 1rem;
       cursor: pointer;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26), 0 0 20px rgba(255, 204, 92, 0.18);
     }
     .error {
       margin-bottom: 14px;
@@ -71,19 +89,19 @@
     .hint, .setup {
       margin-top: 16px;
       padding: 14px;
-      border-radius: 14px;
+      border-radius: 8px;
       border: 1px solid var(--border);
-      background: rgba(23, 35, 58, 0.8);
+      background: rgba(25, 26, 29, 0.9);
     }
     code {
       display: block;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
-      background: rgba(9, 17, 31, 0.8);
-      border-radius: 10px;
+      background: rgba(14, 15, 18, 0.92);
+      border-radius: 8px;
       padding: 10px;
       margin-top: 10px;
-      color: #d7e5ff;
+      color: #eceff3;
     }
     img { display: block; margin: 12px auto 0; border-radius: 12px; background: white; padding: 10px; }
   </style>

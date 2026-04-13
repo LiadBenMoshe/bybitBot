@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -36,9 +36,14 @@ class TraderEngine:
         self.thread: Optional[threading.Thread] = None
         self.status = "Stopped"
         self.trade_count = 0
+        self.winning_trades = 0
+        self.losing_trades = 0
+        self.breakeven_trades = 0
         self.realized_pnl = 0.0
         self.cash_balance = settings.initial_balance
         self.last_error = ""
+        self.consecutive_losses = 0
+        self.pause_new_entries_until: Optional[datetime] = None
         self.positions: dict[str, Position] = {}
         self.recent_trades: list[dict[str, Any]] = []
         self.market_history: dict[str, pd.DataFrame] = {}
@@ -148,12 +153,17 @@ class TraderEngine:
             stop_distance = max(abs(price - stop_loss), 0.0001)
         else:
             stop_distance = max(price * self.settings.stop_loss_pct, 0.0001)
-        return round(risk_amount / stop_distance, 6)
+        risk_based_qty = risk_amount / stop_distance
+        max_notional = self.cash_balance * self.settings.max_position_notional_pct
+        max_notional_qty = max_notional / max(price, 0.0001)
+        return round(min(risk_based_qty, max_notional_qty), 6)
 
     def _process_signal(self, signal: Signal) -> None:
         with self.lock:
             existing = self.positions.get(signal.symbol)
             if signal.action == "hold":
+                return
+            if self._is_entry_pause_active(signal.timestamp):
                 return
             action = self._effective_action(signal.action)
             if self._is_in_cooldown(signal.symbol, signal.timestamp):
@@ -199,6 +209,15 @@ class TraderEngine:
             minutes_per_bar = 15
         return (timestamp - last_closed).total_seconds() < self.settings.cooldown_bars * minutes_per_bar * 60
 
+    def _minutes_per_bar(self) -> int:
+        try:
+            return int(self.settings.timeframe)
+        except ValueError:
+            return 15
+
+    def _is_entry_pause_active(self, timestamp: datetime) -> bool:
+        return self.pause_new_entries_until is not None and timestamp < self.pause_new_entries_until
+
     def _open_position(
         self,
         symbol: str,
@@ -233,6 +252,8 @@ class TraderEngine:
             take_profit=take_profit,
             leverage=self.settings.leverage,
             exchange_order_id=order_id,
+            peak_price=price,
+            trough_price=price,
         )
         record = TradeRecord(
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -268,6 +289,27 @@ class TraderEngine:
         self.realized_pnl += pnl
         self.cash_balance += pnl
         self.trade_count += 1
+        if pnl > 0:
+            self.winning_trades += 1
+            self.consecutive_losses = 0
+        elif pnl < 0:
+            self.losing_trades += 1
+            self.consecutive_losses += 1
+        else:
+            self.breakeven_trades += 1
+            self.consecutive_losses = 0
+        if (
+            pnl < 0
+            and self.settings.max_consecutive_losses > 0
+            and self.consecutive_losses >= self.settings.max_consecutive_losses
+        ):
+            pause_minutes = self.settings.cooldown_after_loss_bars * self._minutes_per_bar()
+            self.pause_new_entries_until = datetime.now(timezone.utc) + timedelta(minutes=pause_minutes)
+            self.logger.info(
+                "Pausing new entries until %s after %s consecutive losses.",
+                self.pause_new_entries_until.isoformat(),
+                self.consecutive_losses,
+            )
         record = TradeRecord(
             timestamp=datetime.now(timezone.utc).isoformat(),
             symbol=symbol,
@@ -297,11 +339,34 @@ class TraderEngine:
         position = self.positions.get(symbol)
         if position:
             position.unrealized_pnl = self._compute_pnl(position, price)
+            position.peak_price = max(position.peak_price, price)
+            position.trough_price = min(position.trough_price, price)
+
+    def _update_protective_stop(self, position: Position) -> None:
+        if position.break_even_armed or self.settings.break_even_trigger_pct <= 0:
+            return
+        trigger_pct = self.settings.break_even_trigger_pct
+        offset_pct = self.settings.break_even_offset_pct
+        if position.side == "long":
+            favorable_move = (position.peak_price - position.entry_price) / max(position.entry_price, 0.0001)
+            if favorable_move >= trigger_pct:
+                new_stop = position.entry_price * (1 + offset_pct)
+                if new_stop > position.stop_loss:
+                    position.stop_loss = new_stop
+                position.break_even_armed = True
+        else:
+            favorable_move = (position.entry_price - position.trough_price) / max(position.entry_price, 0.0001)
+            if favorable_move >= trigger_pct:
+                new_stop = position.entry_price * (1 - offset_pct)
+                if new_stop < position.stop_loss:
+                    position.stop_loss = new_stop
+                position.break_even_armed = True
 
     def _evaluate_risk_exits(self, symbol: str, price: float) -> None:
         position = self.positions.get(symbol)
         if not position:
             return
+        self._update_protective_stop(position)
         if position.side == "long":
             if price <= position.stop_loss:
                 self._close_position(symbol, price, "Stop loss")
@@ -353,9 +418,16 @@ class TraderEngine:
     def get_snapshot(self) -> Dict[str, Any]:
         with self.lock:
             unrealized = sum(position.unrealized_pnl for position in self.positions.values())
+            success_rate = (self.winning_trades / self.trade_count * 100) if self.trade_count else 0.0
             return {
                 "status": self.status,
                 "trade_count": self.trade_count,
+                "winning_trades": self.winning_trades,
+                "losing_trades": self.losing_trades,
+                "breakeven_trades": self.breakeven_trades,
+                "success_rate_pct": round(success_rate, 2),
+                "consecutive_losses": self.consecutive_losses,
+                "entry_pause_until": self.pause_new_entries_until.isoformat() if self.pause_new_entries_until else "",
                 "open_positions": [asdict(position) for position in self.positions.values()],
                 "realized_pnl": round(self.realized_pnl, 2),
                 "unrealized_pnl": round(unrealized, 2),
@@ -384,9 +456,16 @@ class TraderEngine:
     def get_compact_snapshot(self) -> Dict[str, Any]:
         with self.lock:
             unrealized = sum(position.unrealized_pnl for position in self.positions.values())
+            success_rate = (self.winning_trades / self.trade_count * 100) if self.trade_count else 0.0
             return {
                 "status": self.status,
                 "trade_count": self.trade_count,
+                "winning_trades": self.winning_trades,
+                "losing_trades": self.losing_trades,
+                "breakeven_trades": self.breakeven_trades,
+                "success_rate_pct": round(success_rate, 2),
+                "consecutive_losses": self.consecutive_losses,
+                "entry_pause_until": self.pause_new_entries_until.isoformat() if self.pause_new_entries_until else "",
                 "open_position_count": len(self.positions),
                 "realized_pnl": round(self.realized_pnl, 2),
                 "unrealized_pnl": round(unrealized, 2),

@@ -7,27 +7,45 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #08101d;
-      --panel: rgba(15, 23, 42, 0.92);
-      --panel-2: rgba(23, 35, 58, 0.95);
-      --border: rgba(110, 129, 172, 0.22);
-      --text: #f8fafc;
-      --muted: #9fb3cf;
-      --accent: #5eead4;
-      --accent-strong: #2dd4bf;
+      --bg: #050505;
+      --panel: rgba(14, 14, 16, 0.95);
+      --panel-2: rgba(28, 29, 33, 0.98);
+      --border: rgba(196, 150, 54, 0.38);
+      --text: #f5ecd7;
+      --muted: #c4ae7d;
+      --accent: #d7aa43;
+      --accent-strong: #ffd978;
       --good: #4ade80;
       --bad: #fb7185;
-      --warn: #fbbf24;
+      --warn: #f59e0b;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: var(--text);
-      font-family: "Segoe UI", Tahoma, sans-serif;
+      font-family: "Courier New", "Lucida Console", monospace;
       background:
-        radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 25%),
-        radial-gradient(circle at top right, rgba(94, 234, 212, 0.1), transparent 28%),
-        linear-gradient(180deg, #07101d 0%, #0a1323 100%);
+        radial-gradient(circle at top left, rgba(214, 174, 72, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(142, 101, 28, 0.12), transparent 24%),
+        repeating-linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.015) 0,
+          rgba(255, 255, 255, 0.015) 1px,
+          transparent 1px,
+          transparent 4px
+        ),
+        linear-gradient(180deg, #0f1012 0%, #050505 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at center, transparent 50%, rgba(0, 0, 0, 0.34) 100%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 12%, transparent 88%, rgba(255, 255, 255, 0.02));
+      mix-blend-mode: screen;
+      opacity: 0.5;
     }
     .shell {
       width: min(100%, 460px);
@@ -39,16 +57,64 @@
     .topbar, .panel, .stat, .data-card {
       border: 1px solid var(--border);
       background: var(--panel);
-      backdrop-filter: blur(10px);
-      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.22);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 217, 120, 0.06);
     }
     .topbar {
-      border-radius: 22px;
+      border-radius: 10px;
       padding: 16px;
       display: grid;
       gap: 14px;
+      position: relative;
+      overflow: hidden;
     }
-    .title h1 { margin: 0; font-size: 1.35rem; }
+    .topbar::before,
+    .panel::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      top: 10px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 217, 120, 0.72), transparent);
+      pointer-events: none;
+    }
+    .title h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-shadow: 0 0 12px rgba(255, 217, 120, 0.22);
+      position: relative;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(196, 150, 54, 0.28);
+    }
+    .title p,
+    .label,
+    .meta-label,
+    .data-key,
+    .status-line,
+    .note,
+    .trade-subline,
+    .trade-reason,
+    .pill,
+    .symbol-chip,
+    label,
+    select,
+    input[type="text"],
+    button,
+    .nav a,
+    .logout button {
+      font-family: "Courier New", "Lucida Console", monospace;
+      letter-spacing: 0.03em;
+    }
+    .stat .value,
+    .meta-value,
+    .data-value,
+    .trade-symbol,
+    .trade-pnl {
+      font-family: "Georgia", "Times New Roman", serif;
+      letter-spacing: normal;
+    }
     .title p { margin: 6px 0 0; color: var(--muted); }
     .actions, .nav {
       display: grid;
@@ -60,7 +126,7 @@
     .nav a, button, .logout button {
       width: 100%;
       min-height: 48px;
-      border-radius: 14px;
+      border-radius: 8px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
@@ -72,34 +138,36 @@
       line-height: 1.2;
       text-align: center;
       transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
-      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.26);
     }
     .nav a.active {
-      border-color: rgba(94, 234, 212, 0.45);
-      background: rgba(20, 184, 166, 0.18);
+      border-color: rgba(255, 217, 120, 0.58);
+      background: linear-gradient(180deg, rgba(124, 86, 18, 0.88), rgba(57, 41, 10, 0.98));
       color: var(--accent);
     }
     .nav a:hover, button:hover, .logout button:hover {
-      border-color: rgba(159, 179, 207, 0.42);
-      box-shadow: 0 12px 22px rgba(0, 0, 0, 0.24);
+      border-color: rgba(255, 217, 120, 0.48);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28), 0 0 18px rgba(215, 170, 67, 0.12);
     }
     .nav a:active, button:active, .logout button:active {
       transform: translateY(2px) scale(0.985);
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.26);
     }
     button.primary {
-      background: linear-gradient(180deg, rgba(45, 212, 191, 0.2), rgba(20, 184, 166, 0.12));
-      border-color: rgba(94, 234, 212, 0.45);
-      color: var(--accent);
+      background: linear-gradient(180deg, rgba(255, 213, 102, 0.98), rgba(208, 149, 33, 0.98));
+      border-color: rgba(255, 232, 168, 0.62);
+      color: #1a1304;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26), 0 0 20px rgba(255, 204, 92, 0.2);
     }
     button.primary:hover {
-      border-color: rgba(94, 234, 212, 0.68);
-      background: linear-gradient(180deg, rgba(45, 212, 191, 0.28), rgba(20, 184, 166, 0.16));
+      border-color: rgba(255, 240, 194, 0.82);
+      background: linear-gradient(180deg, rgba(255, 226, 138, 1), rgba(231, 171, 48, 1));
     }
     button.danger {
-      color: #fecdd3;
-      border-color: rgba(251, 113, 133, 0.35);
-      background: linear-gradient(180deg, rgba(127, 29, 29, 0.34), rgba(127, 29, 29, 0.22));
+      color: #fff0cd;
+      border-color: rgba(255, 184, 96, 0.36);
+      background: linear-gradient(180deg, rgba(186, 77, 23, 0.96), rgba(97, 34, 5, 0.98));
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26), 0 0 18px rgba(255, 140, 64, 0.16);
     }
     .grid {
       display: grid;
@@ -107,19 +175,41 @@
       gap: 12px;
     }
     .stat {
-      border-radius: 18px;
+      border-radius: 8px;
       padding: 15px;
       min-height: 98px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: linear-gradient(180deg, rgba(255, 217, 120, 0.9), rgba(137, 99, 24, 0.45));
     }
     .stat .label { color: var(--muted); font-size: 0.92rem; }
     .stat .value { margin-top: 8px; font-size: 1.28rem; font-weight: 700; }
     .stat.good .value { color: var(--good); }
     .stat.bad .value { color: var(--bad); }
     .panel {
-      border-radius: 20px;
+      border-radius: 8px;
       padding: 16px;
+      position: relative;
+      overflow: hidden;
     }
-    .panel h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 1.05rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent-strong);
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(196, 150, 54, 0.26);
+      text-shadow: 0 0 10px rgba(255, 217, 120, 0.14);
+    }
     .meta {
       display: grid;
       grid-template-columns: 1fr;
@@ -127,10 +217,11 @@
     }
     .meta-card {
       padding: 12px 14px;
-      border-radius: 14px;
-      background: rgba(24, 36, 59, 0.9);
-      border: 1px solid rgba(110, 129, 172, 0.18);
+      border-radius: 8px;
+      background: rgba(23, 24, 27, 0.94);
+      border: 1px solid rgba(196, 150, 54, 0.18);
       min-height: 78px;
+      box-shadow: inset 0 1px 0 rgba(255, 217, 120, 0.04);
     }
     .meta-card .meta-label {
       color: var(--muted);
@@ -159,10 +250,10 @@
       margin-bottom: 12px;
     }
     .status-box {
-      border-radius: 14px;
+      border-radius: 8px;
       padding: 12px 14px;
-      background: rgba(24, 36, 59, 0.72);
-      border: 1px solid rgba(110, 129, 172, 0.18);
+      background: rgba(22, 23, 26, 0.9);
+      border: 1px solid rgba(196, 150, 54, 0.18);
     }
     .hidden { display: none; }
     .stack { display: grid; gap: 16px; }
@@ -171,7 +262,7 @@
       gap: 10px;
     }
     select {
-      border-radius: 12px;
+      border-radius: 8px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
@@ -180,7 +271,7 @@
       width: 100%;
     }
     input[type="text"] {
-      border-radius: 12px;
+      border-radius: 8px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
@@ -202,9 +293,9 @@
       align-items: center;
       color: var(--muted);
       padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(24, 36, 59, 0.72);
-      border: 1px solid rgba(110, 129, 172, 0.18);
+      border-radius: 8px;
+      background: rgba(22, 23, 26, 0.9);
+      border: 1px solid rgba(196, 150, 54, 0.18);
     }
     .note {
       color: var(--muted);
@@ -214,9 +305,9 @@
       display: inline-block;
       padding: 6px 10px;
       border-radius: 999px;
-      background: rgba(20, 184, 166, 0.12);
+      background: rgba(124, 89, 18, 0.22);
       color: var(--accent);
-      border: 1px solid rgba(94, 234, 212, 0.24);
+      border: 1px solid rgba(255, 217, 120, 0.22);
       font-size: 0.85rem;
     }
     .logout { margin: 0; }
@@ -230,9 +321,9 @@
       align-items: center;
       padding: 7px 10px;
       border-radius: 999px;
-      border: 1px solid rgba(94, 234, 212, 0.2);
-      background: rgba(45, 212, 191, 0.08);
-      color: #d6fffa;
+      border: 1px solid rgba(255, 217, 120, 0.16);
+      background: rgba(114, 84, 18, 0.18);
+      color: #f5ecd7;
       font-size: 0.82rem;
       font-weight: 700;
     }
@@ -246,9 +337,117 @@
       display: grid;
       gap: 10px;
     }
+    .trade-list {
+      display: grid;
+      gap: 8px;
+    }
+    .trade-card {
+      border-radius: 8px;
+      padding: 10px 12px;
+      border: 1px solid rgba(196, 150, 54, 0.14);
+      background: rgba(14, 14, 16, 0.96);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+      position: relative;
+      overflow: hidden;
+    }
+    .trade-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 217, 120, 0.42), transparent);
+    }
+    .trade-card.good {
+      border-color: rgba(74, 222, 128, 0.35);
+      background: linear-gradient(180deg, rgba(20, 83, 45, 0.26), rgba(15, 23, 42, 0.94));
+    }
+    .trade-card.bad {
+      border-color: rgba(251, 113, 133, 0.35);
+      background: linear-gradient(180deg, rgba(127, 29, 29, 0.24), rgba(15, 23, 42, 0.94));
+    }
+    .trade-card.neutral {
+      border-color: rgba(196, 150, 54, 0.18);
+    }
+    .trade-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .trade-line + .trade-line {
+      margin-top: 6px;
+    }
+    .trade-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    .trade-symbol {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .trade-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid rgba(196, 150, 54, 0.18);
+      background: rgba(30, 31, 35, 0.95);
+    }
+    .trade-badge.long, .trade-badge.open {
+      color: var(--good);
+      border-color: rgba(74, 222, 128, 0.25);
+      background: rgba(20, 83, 45, 0.28);
+    }
+    .trade-badge.short, .trade-badge.close {
+      color: var(--bad);
+      border-color: rgba(251, 113, 133, 0.25);
+      background: rgba(127, 29, 29, 0.26);
+    }
+    .trade-pnl {
+      font-size: 0.9rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .trade-card.good .trade-pnl {
+      color: var(--good);
+    }
+    .trade-card.bad .trade-pnl {
+      color: var(--bad);
+    }
+    .trade-card.neutral .trade-pnl {
+      color: var(--muted);
+    }
+    .trade-subline {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .trade-reason {
+      color: #dbeafe;
+      font-size: 0.79rem;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
     .data-card {
-      border-radius: 16px;
+      border-radius: 8px;
       padding: 14px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 217, 120, 0.04);
     }
     .data-card-head {
       display: flex;
@@ -268,9 +467,9 @@
     }
     .data-item {
       padding: 10px 11px;
-      border-radius: 12px;
-      background: rgba(24, 36, 59, 0.72);
-      border: 1px solid rgba(110, 129, 172, 0.14);
+      border-radius: 8px;
+      background: rgba(21, 22, 25, 0.88);
+      border: 1px solid rgba(196, 150, 54, 0.14);
       min-width: 0;
     }
     .data-item.wide {
@@ -294,8 +493,8 @@
       width: 48px;
       height: 28px;
       border-radius: 999px;
-      background: rgba(110, 129, 172, 0.28);
-      border: 1px solid rgba(110, 129, 172, 0.35);
+      background: rgba(88, 93, 101, 0.34);
+      border: 1px solid rgba(196, 150, 54, 0.28);
       position: relative;
       cursor: pointer;
       transition: background 120ms ease, border-color 120ms ease;
@@ -313,8 +512,8 @@
       box-shadow: 0 3px 8px rgba(0, 0, 0, 0.28);
     }
     .switch:checked {
-      background: rgba(45, 212, 191, 0.36);
-      border-color: rgba(94, 234, 212, 0.5);
+      background: rgba(209, 164, 63, 0.52);
+      border-color: rgba(255, 217, 120, 0.36);
     }
     .switch:checked::after {
       transform: translateX(19px);
@@ -524,6 +723,55 @@
       }).join("")}</div>`;
     }
 
+    function formatTradeNumber(value, digits = 4) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : "-";
+    }
+
+    function formatTradePnl(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "-";
+      return `${num > 0 ? "+" : ""}${num.toFixed(2)} USDT`;
+    }
+
+    function tradeTone(row) {
+      const pnl = Number(row.pnl);
+      if (Number.isFinite(pnl) && pnl !== 0) {
+        return pnl > 0 ? "good" : "bad";
+      }
+      if (row.side === "long" || row.action === "open") {
+        return "good";
+      }
+      if (row.side === "short" || row.action === "close") {
+        return "bad";
+      }
+      return "neutral";
+    }
+
+    function renderRecentTrades(rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="status-line">No trades recorded yet.</div>`;
+      }
+      return `<div class="trade-list">${rows.map((row) => `
+        <article class="trade-card ${tradeTone(row)}">
+          <div class="trade-line">
+            <div class="trade-main">
+              <div class="trade-symbol">${row.symbol ?? "-"}</div>
+              <span class="trade-badge ${String(row.side || "").toLowerCase()}">${row.side ?? "-"}</span>
+              <span class="trade-badge ${String(row.action || "").toLowerCase()}">${row.action ?? "-"}</span>
+            </div>
+            <div class="trade-pnl">${formatTradePnl(row.pnl)}</div>
+          </div>
+          <div class="trade-line">
+            <div class="trade-subline">
+              Qty ${formatTradeNumber(row.qty, 3)} | In ${formatTradeNumber(row.entry_price)} | Out ${formatTradeNumber(row.exit_price)}
+            </div>
+          </div>
+          <div class="trade-reason">${row.reason ?? ""}</div>
+        </article>
+      `).join("")}</div>`;
+    }
+
     function renderStats(snapshot) {
       if (view === "control") {
         statsEl.innerHTML = [
@@ -531,6 +779,7 @@
           renderStatCard("Total PnL", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
           renderStatCard("Open Positions", snapshot.open_position_count),
           renderStatCard("Trades", snapshot.trade_count),
+          renderStatCard("Success Rate", `${Number(snapshot.success_rate_pct ?? 0).toFixed(2)}%`),
           renderStatCard("Balance", formatMoney(snapshot.balance)),
           renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
         ].join("");
@@ -543,6 +792,7 @@
       statsEl.innerHTML = [
         renderStatCard("Bot Status", snapshot.status, snapshot.status === "Running" ? "good" : "bad"),
         renderStatCard("Trades Executed", snapshot.trade_count),
+        renderStatCard("Success Rate", `${Number(snapshot.success_rate_pct ?? 0).toFixed(2)}%`),
         renderStatCard("Balance", formatMoney(snapshot.balance)),
         renderStatCard("Total PnL", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
         renderStatCard("Open Positions", snapshot.open_positions.length),
@@ -550,7 +800,7 @@
         renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
       ].join("");
       positionsEl.innerHTML = renderPositionsTable(snapshot.open_positions);
-      tradesEl.innerHTML = renderTable(snapshot.recent_trades, "symbol");
+      tradesEl.innerHTML = renderRecentTrades(snapshot.recent_trades);
       filterEl.innerHTML = renderTable(snapshot.symbol_filter_results, "symbol");
       actionStatusEl.textContent = snapshot.last_error
         ? `Last error: ${snapshot.last_error}`

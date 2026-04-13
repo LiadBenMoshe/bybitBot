@@ -28,6 +28,11 @@ class Settings:
     leverage: int = field(default_factory=lambda: int(os.getenv("DEFAULT_LEVERAGE", "2")))
     stop_loss_pct: float = field(default_factory=lambda: float(os.getenv("STOP_LOSS_PCT", "0.01")))
     take_profit_pct: float = field(default_factory=lambda: float(os.getenv("TAKE_PROFIT_PCT", "0.02")))
+    max_position_notional_pct: float = field(default_factory=lambda: float(os.getenv("MAX_POSITION_NOTIONAL_PCT", "0.75")))
+    break_even_trigger_pct: float = field(default_factory=lambda: float(os.getenv("BREAK_EVEN_TRIGGER_PCT", "0.003")))
+    break_even_offset_pct: float = field(default_factory=lambda: float(os.getenv("BREAK_EVEN_OFFSET_PCT", "0.0003")))
+    max_consecutive_losses: int = field(default_factory=lambda: int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2")))
+    cooldown_after_loss_bars: int = field(default_factory=lambda: int(os.getenv("COOLDOWN_AFTER_LOSS_BARS", "3")))
     max_positions: int = field(default_factory=lambda: int(os.getenv("MAX_OPEN_POSITIONS", "3")))
     poll_interval_seconds: int = field(default_factory=lambda: int(os.getenv("POLL_INTERVAL_SECONDS", "15")))
     log_dir: Path = field(default_factory=lambda: Path(os.getenv("LOG_DIR", "logs")))
@@ -116,6 +121,14 @@ class Settings:
             raise ValueError("RISK_PER_TRADE must be between 0 and 0.05.")
         if self.stop_loss_pct <= 0 or self.take_profit_pct <= 0:
             raise ValueError("STOP_LOSS_PCT and TAKE_PROFIT_PCT must be positive.")
+        if self.max_position_notional_pct <= 0 or self.max_position_notional_pct > 5:
+            raise ValueError("MAX_POSITION_NOTIONAL_PCT must be between 0 and 5.")
+        if self.break_even_trigger_pct < 0 or self.break_even_offset_pct < 0:
+            raise ValueError("BREAK_EVEN_TRIGGER_PCT and BREAK_EVEN_OFFSET_PCT must be non-negative.")
+        if self.max_consecutive_losses < 0:
+            raise ValueError("MAX_CONSECUTIVE_LOSSES must be non-negative.")
+        if self.cooldown_after_loss_bars < 0:
+            raise ValueError("COOLDOWN_AFTER_LOSS_BARS must be non-negative.")
         if not self.symbols:
             raise ValueError("At least one symbol must be configured in TRADING_SYMBOLS.")
         if self.timeframe not in {"5", "15", "30", "60", "240", "D"}:
