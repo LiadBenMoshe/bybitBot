@@ -781,7 +781,9 @@
           renderStatCard("Trades", snapshot.trade_count),
           renderStatCard("Success Rate", `${Number(snapshot.success_rate_pct ?? 0).toFixed(2)}%`),
           renderStatCard("Balance", formatMoney(snapshot.balance)),
-          renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
+          renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl)),
+          renderStatCard("Fees Paid", formatMoney(snapshot.total_fees_paid), "bad"),
+          renderStatCard("Pending Entries", snapshot.pending_entry_count ?? 0)
         ].join("");
         actionStatusEl.textContent = snapshot.last_error
           ? `Last error: ${snapshot.last_error}`
@@ -794,10 +796,17 @@
         renderStatCard("Trades Executed", snapshot.trade_count),
         renderStatCard("Success Rate", `${Number(snapshot.success_rate_pct ?? 0).toFixed(2)}%`),
         renderStatCard("Balance", formatMoney(snapshot.balance)),
-        renderStatCard("Total PnL", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
+        renderStatCard("Total PnL (net)", formatMoney(snapshot.total_pnl), toneClass(snapshot.total_pnl)),
         renderStatCard("Open Positions", snapshot.open_positions.length),
-        renderStatCard("Realized PnL", formatMoney(snapshot.realized_pnl), toneClass(snapshot.realized_pnl)),
-        renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl))
+        renderStatCard("Realized PnL (net)", formatMoney(snapshot.realized_pnl), toneClass(snapshot.realized_pnl)),
+        renderStatCard("Unrealized PnL", formatMoney(snapshot.unrealized_pnl), toneClass(snapshot.unrealized_pnl)),
+        renderStatCard("Gross Realized", formatMoney(snapshot.gross_realized_pnl), toneClass(snapshot.gross_realized_pnl)),
+        renderStatCard("Fees Paid", formatMoney(snapshot.total_fees_paid), "bad"),
+        renderStatCard("Fee Drag", `${Number(snapshot.fee_drag_pct ?? 0).toFixed(2)}%`,
+          Number(snapshot.fee_drag_pct ?? 0) > 25 ? "bad" : ""),
+        renderStatCard("Round Trip Cost",
+          `${Number(snapshot.round_trip_cost_pct ?? 0).toFixed(3)}% (${snapshot.entry_style ?? "-"})`),
+        renderStatCard("Entries Missed", snapshot.entries_missed ?? 0)
       ].join("");
       positionsEl.innerHTML = renderPositionsTable(snapshot.open_positions);
       tradesEl.innerHTML = renderRecentTrades(snapshot.recent_trades);
@@ -827,10 +836,12 @@
     }
 
     async function postAction(endpoint) {
-      actionStatusEl.textContent = endpoint.endsWith("/start") ? "Starting bot..." : "Stopping bot...";
+      actionStatusEl.textContent = endpoint.endsWith("/start")
+        ? "Starting bot (running the backtest filter, this can take ~15s)..."
+        : "Stopping bot...";
       const response = await fetch(endpoint, { method: "POST", credentials: "same-origin" });
       const payload = await response.json();
-      actionStatusEl.textContent = payload.error || payload.status || "Done.";
+      actionStatusEl.textContent = payload.error || payload.last_error || payload.status || "Done.";
       if (response.ok) {
         await loadSnapshot();
       }
@@ -852,7 +863,11 @@
         return;
       }
       backtestResultEl.textContent =
-        `${payload.symbol}: Return ${payload.total_return_pct}% | Trades ${payload.trades} | Win ${payload.win_rate_pct}% | PF ${payload.profit_factor}`;
+        `${payload.symbol}: Net ${payload.total_return_pct}% (gross ${payload.gross_return_pct}%) | ` +
+        `Trades ${payload.trades} | Win ${payload.win_rate_pct}% | ` +
+        `Net PF ${payload.profit_factor} (gross ${payload.gross_profit_factor}) | ` +
+        `Expectancy ${payload.expectancy_r}R | Fees ${payload.total_fees} (${payload.fee_drag_pct}% of gross) | ` +
+        `Missed ${payload.entries_missed} | ${payload.filter_reason}`;
     }
 
     async function closePosition(symbol) {

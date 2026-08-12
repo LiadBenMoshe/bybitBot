@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from pandas import isna
 
+from costs import CostModel, EdgeAssessment, assess_edge, build_cost_model
 from models import Signal
 
 if TYPE_CHECKING:
@@ -47,11 +48,44 @@ class StrategyConfig:
     min_range_width_pct: float = 0.004
     ema_retest_tolerance_pct: float = 0.0025
     require_macd_hist_improving: bool = True
+    min_target_to_cost_ratio: float = 4.0
+    min_net_reward_risk: float = 1.5
+    require_positive_expectancy: bool = True
+    invert_signals: bool = False
 
 
 class IndicatorStrategy:
-    def __init__(self, config: StrategyConfig) -> None:
+    def __init__(self, config: StrategyConfig, cost: CostModel) -> None:
         self.config = config
+        self.cost = cost
+
+    def min_atr_pct(self) -> float:
+        """Volatility floor: the configured absolute floor or the cost-derived one, whichever binds."""
+        by_target = self.cost.min_atr_pct_for_target(
+            self.config.atr_target_multiple, self.config.min_target_to_cost_ratio
+        )
+        by_reward_risk = self.cost.min_atr_pct_for_reward_risk(
+            self.config.atr_target_multiple, self.config.atr_stop_multiple, self.config.min_net_reward_risk
+        )
+        return max(self.config.atr_min_pct, by_target, by_reward_risk)
+
+    def _veto_edge(self, edge: EdgeAssessment) -> str:
+        """Return a rejection reason when the trade cannot pay for itself, else ''."""
+        round_trip = self.cost.round_trip_pct()
+        if edge.net_target_pct <= 0:
+            return f"Target {edge.target_pct * 100:.2f}% does not clear {round_trip * 100:.3f}% cost"
+        if edge.net_target_pct < self.config.min_expected_move_pct:
+            return f"Net target {edge.net_target_pct * 100:.2f}% below MIN_EXPECTED_MOVE_PCT"
+        if edge.net_target_pct < self.config.min_target_to_cost_ratio * round_trip:
+            return (
+                f"Net target {edge.net_target_pct * 100:.2f}% < "
+                f"{self.config.min_target_to_cost_ratio:g}x cost"
+            )
+        if edge.net_reward_risk < self.config.min_net_reward_risk:
+            return f"Net RR {edge.net_reward_risk:.2f} < {self.config.min_net_reward_risk:g}"
+        if self.config.require_positive_expectancy and edge.expectancy_pct <= 0:
+            return f"Negative expectancy {edge.expectancy_pct * 100:.3f}%"
+        return ""
 
     def apply_indicators(self, frame: pd.DataFrame) -> pd.DataFrame:
         df = frame.copy()
@@ -114,8 +148,8 @@ class IndicatorStrategy:
         df["expected_move_pct"] = np.maximum(df["atr_pct"] * 2.2, df["ema_spread_pct"] * 3.2)
         return df
 
-    def generate_signal(self, symbol: str, frame: pd.DataFrame) -> Signal:
-        df = self.apply_indicators(frame)
+    def generate_signal(self, symbol: str, frame: pd.DataFrame, indicators_ready: bool = False) -> Signal:
+        df = frame if indicators_ready else self.apply_indicators(frame)
         latest = df.iloc[-1]
         previous = df.iloc[-2] if len(df) > 1 else latest
         long_score = 0
@@ -223,14 +257,15 @@ class IndicatorStrategy:
             short_score += 1
             reasons.append("MACD bearish")
 
-        if isna(atr_pct) or atr_pct < self.config.atr_min_pct:
+        min_atr_pct = self.min_atr_pct()
+        if isna(atr_pct) or atr_pct < min_atr_pct:
             return Signal(
                 symbol=symbol,
                 action="hold",
                 price=float(latest["close"]),
                 timestamp=latest["timestamp"].to_pydatetime(),
                 confidence=0.0,
-                reason="ATR filter blocked trade",
+                reason=f"ATR {0.0 if isna(atr_pct) else atr_pct * 100:.3f}% below cost-derived floor {min_atr_pct * 100:.3f}%",
             )
         if isna(adx) or adx < self.config.min_adx:
             return Signal(
@@ -323,17 +358,14 @@ class IndicatorStrategy:
             action = "sell"
             confidence = min(short_score / 10, 1.0)
 
-        if self.config.extreme_entry_mode and action != "hold":
+        # Vetoes are judged on the direction the confluence actually detected.
+        if action != "hold" and self.config.extreme_entry_mode:
             breakout_confirmed = breakout_up if action == "buy" else breakout_down
             continuation_confirmed = breakout_confirmed or (pullback_long if action == "buy" else pullback_short)
             if self.config.require_breakout_confirmation and not continuation_confirmed:
                 action = "hold"
                 confidence = 0.0
                 reasons.append("Extreme mode needs continuation")
-            elif isna(expected_move_pct) or expected_move_pct < self.config.min_expected_move_pct:
-                action = "hold"
-                confidence = 0.0
-                reasons.append("Expected move too small")
             elif not strong_candle:
                 action = "hold"
                 confidence = 0.0
@@ -342,14 +374,43 @@ class IndicatorStrategy:
                 action = "hold"
                 confidence = 0.0
                 reasons.append("Confidence too low")
-            elif not isna(latest["atr"]) and latest["atr"] > 0:
-                atr = float(latest["atr"])
-                if action == "buy":
-                    stop_loss = float(latest["close"] - atr * self.config.atr_stop_multiple)
-                    take_profit = float(latest["close"] + atr * self.config.atr_target_multiple)
+
+        # Contrarian mode flips the side *before* exits are priced, so the stop
+        # always sits on the losing side of the position actually taken.
+        if self.config.invert_signals and action != "hold":
+            action = "sell" if action == "buy" else "buy"
+            reasons.append("Inverted")
+
+        # Exit levels are always ATR-derived, so the gate below prices the trade
+        # that will actually be taken rather than a heuristic proxy for it.
+        if action != "hold":
+            atr = 0.0 if isna(latest["atr"]) else float(latest["atr"])
+            if atr <= 0:
+                action = "hold"
+                confidence = 0.0
+                reasons.append("ATR unavailable for exit sizing")
+            else:
+                edge = assess_edge(
+                    self.cost,
+                    float(atr_pct),
+                    self.config.atr_stop_multiple,
+                    self.config.atr_target_multiple,
+                    confidence,
+                )
+                veto = self._veto_edge(edge)
+                if veto:
+                    action = "hold"
+                    confidence = 0.0
+                    reasons.append(veto)
                 else:
-                    stop_loss = float(latest["close"] + atr * self.config.atr_stop_multiple)
-                    take_profit = float(latest["close"] - atr * self.config.atr_target_multiple)
+                    reasons.append(edge.describe())
+                    close_price = float(latest["close"])
+                    if action == "buy":
+                        stop_loss = close_price - atr * self.config.atr_stop_multiple
+                        take_profit = close_price + atr * self.config.atr_target_multiple
+                    else:
+                        stop_loss = close_price + atr * self.config.atr_stop_multiple
+                        take_profit = close_price - atr * self.config.atr_target_multiple
 
         return Signal(
             symbol=symbol,
@@ -397,4 +458,14 @@ def build_strategy_config(settings: "Settings") -> StrategyConfig:
         min_range_width_pct=settings.min_range_width_pct,
         ema_retest_tolerance_pct=settings.ema_retest_tolerance_pct,
         require_macd_hist_improving=settings.require_macd_hist_improving,
+        min_target_to_cost_ratio=settings.min_target_to_cost_ratio,
+        min_net_reward_risk=settings.min_net_reward_risk,
+        require_positive_expectancy=settings.require_positive_expectancy,
+        invert_signals=settings.invert_signals,
     )
+
+
+def build_strategy(settings: "Settings") -> IndicatorStrategy:
+    """Single construction point so trader and backtester share identical wiring."""
+    return IndicatorStrategy(build_strategy_config(settings), build_cost_model(settings))
+

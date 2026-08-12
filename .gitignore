@@ -52,3 +52,6 @@ htmlcov/
 *.swo
 Thumbs.db
 .DS_Store
+
+# Local .env backups
+.env.backup*

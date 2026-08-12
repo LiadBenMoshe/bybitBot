@@ -5,7 +5,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Optional
@@ -97,14 +97,23 @@ class BybitClient:
         result = self._request(self.http.get_positions, **kwargs)
         return result.get("result", {}).get("list", [])
 
-    def get_kline(self, category: str, symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
-        result = self._request(
-            self.http.get_kline,
-            category=category,
-            symbol=symbol,
-            interval=interval,
-            limit=limit,
-        )
+    def get_kline(
+        self,
+        category: str,
+        symbol: str,
+        interval: str,
+        limit: int = 200,
+        end: Optional[int] = None,
+    ) -> pd.DataFrame:
+        kwargs: Dict[str, Any] = {
+            "category": category,
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        if end is not None:
+            kwargs["end"] = end
+        result = self._request(self.http.get_kline, **kwargs)
         rows = result.get("result", {}).get("list", [])
         if not rows:
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
@@ -132,6 +141,39 @@ class BybitClient:
         frame["timestamp"] = pd.to_datetime(frame["start_time"].astype("int64"), unit="ms", utc=True)
         frame = frame.sort_values("timestamp").reset_index(drop=True)
         return frame[["timestamp", "open", "high", "low", "close", "volume", "turnover"]]
+
+    def get_kline_history(self, category: str, symbol: str, interval: str, total: int) -> pd.DataFrame:
+        """Fetch up to `total` candles, paging backwards past the 1000-per-request cap."""
+        frames: list[pd.DataFrame] = []
+        collected = 0
+        end_ms: Optional[int] = None
+        while collected < total:
+            batch_size = min(1000, total - collected)
+            kwargs: Dict[str, Any] = {
+                "category": category,
+                "symbol": symbol,
+                "interval": interval,
+                "limit": batch_size,
+            }
+            if end_ms is not None:
+                kwargs["end"] = end_ms
+            frame = self.get_kline(**kwargs)
+            if frame.empty:
+                break
+            frames.append(frame)
+            collected += len(frame)
+            oldest = frame["timestamp"].iloc[0]
+            next_end = int(oldest.value // 1_000_000) - 1
+            if end_ms is not None and next_end >= end_ms:
+                break
+            end_ms = next_end
+            if len(frame) < batch_size:
+                break
+        if not frames:
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+        combined = pd.concat(frames, ignore_index=True)
+        combined = combined.drop_duplicates(subset=["timestamp"], keep="last").sort_values("timestamp")
+        return combined.reset_index(drop=True).tail(total).reset_index(drop=True)
 
     def get_instrument_info(self, category: str, symbol: str) -> dict[str, Any]:
         cache_key = (category, symbol)
@@ -190,6 +232,90 @@ class BybitClient:
             reduceOnly=reduce_only,
             timeInForce="IOC",
         )
+
+    def normalize_price(self, category: str, symbol: str, price: float, side: str) -> float:
+        """Round a limit price to the instrument tick size.
+
+        Buys round down and sells round up, so a post-only order is never pushed
+        across the spread by rounding. Bybit rejects prices off the tick grid.
+        """
+        instrument = self.get_instrument_info(category, symbol)
+        tick_size = instrument.get("priceFilter", {}).get("tickSize")
+        value = Decimal(str(price))
+        if tick_size:
+            step = Decimal(str(tick_size))
+            if step > 0:
+                rounding = ROUND_DOWN if side.lower() == "buy" else ROUND_UP
+                value = (value / step).to_integral_value(rounding=rounding) * step
+        if value <= 0:
+            raise BybitAPIError(f"Normalized price for {symbol} is not tradable.")
+        return float(value)
+
+    def get_best_bid_ask(self, category: str, symbol: str) -> tuple[float, float]:
+        result = self._request(self.http.get_tickers, category=category, symbol=symbol)
+        items = result.get("result", {}).get("list", [])
+        if not items:
+            raise BybitAPIError(f"No ticker data returned for {symbol}.")
+        item = items[0]
+        bid = float(item.get("bid1Price") or 0.0)
+        ask = float(item.get("ask1Price") or 0.0)
+        if bid <= 0 or ask <= 0:
+            raise BybitAPIError(f"Incomplete book for {symbol}.")
+        return bid, ask
+
+    def place_limit_order(
+        self,
+        category: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        post_only: bool = True,
+        reduce_only: bool = False,
+    ) -> dict[str, Any]:
+        normalized_qty = self.normalize_order_qty(category, symbol, qty)
+        normalized_price = self.normalize_price(category, symbol, price, side)
+        return self._request(
+            self.http.place_order,
+            category=category,
+            symbol=symbol,
+            side=side,
+            orderType="Limit",
+            qty=_decimal_to_string(normalized_qty),
+            price=_decimal_to_string(normalized_price),
+            reduceOnly=reduce_only,
+            timeInForce="PostOnly" if post_only else "GTC",
+        )
+
+    def cancel_order(self, category: str, symbol: str, order_id: str) -> dict[str, Any]:
+        return self._request(self.http.cancel_order, category=category, symbol=symbol, orderId=order_id)
+
+    def get_open_orders(self, category: str, symbol: Optional[str] = None) -> list[dict[str, Any]]:
+        kwargs: Dict[str, Any] = {"category": category}
+        if symbol:
+            kwargs["symbol"] = symbol
+        elif category == "linear":
+            kwargs["settleCoin"] = "USDT"
+        result = self._request(self.http.get_open_orders, **kwargs)
+        return result.get("result", {}).get("list", [])
+
+    def get_order_status(self, category: str, symbol: str, order_id: str) -> dict[str, Any]:
+        """Terminal state of an order that is no longer resting on the book."""
+        result = self._request(self.http.get_order_history, category=category, symbol=symbol, orderId=order_id)
+        items = result.get("result", {}).get("list", [])
+        return items[0] if items else {}
+
+    def get_fee_rates(self, category: str, symbol: Optional[str] = None) -> tuple[float, float]:
+        """Return (maker, taker) for the authenticated account's actual fee tier."""
+        kwargs: Dict[str, Any] = {"category": category}
+        if symbol:
+            kwargs["symbol"] = symbol
+        result = self._request(self.http.get_fee_rates, **kwargs)
+        items = result.get("result", {}).get("list", [])
+        if not items:
+            raise BybitAPIError("No fee rate data returned.")
+        entry = items[0]
+        return float(entry.get("makerFeeRate", 0.0)), float(entry.get("takerFeeRate", 0.0))
 
     def set_leverage(self, category: str, symbol: str, leverage: int) -> None:
         if category == "spot":

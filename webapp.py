@@ -430,9 +430,13 @@ def start_bot(request: Request) -> JSONResponse:
     user, auth_store = authorized
     engine = get_engine()
     engine.start()
+    started = engine.status == "Running"
     if user:
-        auth_store.log_event("bot_start", success=engine.status == "Running", username=user.username)
-    response = _json_response({"ok": True, "status": engine.status, "last_error": engine.last_error})
+        auth_store.log_event("bot_start", success=started, username=user.username)
+    payload = {"ok": started, "status": engine.status, "last_error": engine.last_error}
+    if not started:
+        payload["error"] = engine.last_error or "The bot did not start."
+    response = _json_response(payload, status_code=200 if started else 409)
     if user:
         _set_session_cookie(response, user, session_expiry(SETTINGS))
     return response
@@ -501,6 +505,12 @@ def run_backtest(request: Request, symbol: str = Form(...)) -> JSONResponse:
         "avg_trade_pct": result.avg_trade_pct,
         "passed_filter": result.passed_filter,
         "filter_reason": result.filter_reason,
+        "total_fees": result.total_fees,
+        "fee_drag_pct": result.fee_drag_pct,
+        "expectancy_r": result.expectancy_r,
+        "gross_profit_factor": result.gross_profit_factor,
+        "gross_return_pct": result.gross_return_pct,
+        "entries_missed": result.entries_missed,
     }
     response = _json_response(payload)
     if user:

@@ -14,6 +14,14 @@ def _split_symbols(raw: str) -> List[str]:
     return [item.strip().upper() for item in raw.split(",") if item.strip()]
 
 
+def _float_env(primary: str, default: str, fallback: str = "") -> float:
+    """Read a float env var, optionally falling back to a deprecated key."""
+    raw = os.getenv(primary)
+    if raw is None and fallback:
+        raw = os.getenv(fallback)
+    return float(raw if raw is not None else default)
+
+
 @dataclass(slots=True)
 class Settings:
     api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
@@ -98,6 +106,30 @@ class Settings:
     min_backtest_profit_factor: float = field(default_factory=lambda: float(os.getenv("MIN_BACKTEST_PROFIT_FACTOR", "1.5")))
     max_backtest_drawdown_pct: float = field(default_factory=lambda: float(os.getenv("MAX_BACKTEST_DRAWDOWN_PCT", "20")))
     min_backtest_trades: int = field(default_factory=lambda: int(os.getenv("MIN_BACKTEST_TRADES", "10")))
+    min_backtest_expectancy_r: float = field(default_factory=lambda: float(os.getenv("MIN_BACKTEST_EXPECTANCY_R", "0.05")))
+    require_backtest_approval: bool = field(
+        default_factory=lambda: os.getenv("REQUIRE_BACKTEST_APPROVAL", "true").lower() == "true"
+    )
+    # --- transaction costs -------------------------------------------------
+    maker_fee_rate: float = field(default_factory=lambda: _float_env("MAKER_FEE_RATE", "0.0002"))
+    taker_fee_rate: float = field(default_factory=lambda: _float_env("TAKER_FEE_RATE", "0.00055", fallback="FEE_RATE"))
+    entry_slippage_pct: float = field(default_factory=lambda: _float_env("ENTRY_SLIPPAGE_PCT", "0.0002"))
+    exit_slippage_pct: float = field(default_factory=lambda: _float_env("EXIT_SLIPPAGE_PCT", "0.0004"))
+    auto_sync_fee_rates: bool = field(default_factory=lambda: os.getenv("AUTO_SYNC_FEE_RATES", "true").lower() == "true")
+    # --- maker (post-only) entries ----------------------------------------
+    maker_entry_enabled: bool = field(default_factory=lambda: os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true")
+    maker_entry_timeout_bars: int = field(default_factory=lambda: int(os.getenv("MAKER_ENTRY_TIMEOUT_BARS", "1")))
+    maker_max_chase_pct: float = field(default_factory=lambda: float(os.getenv("MAKER_MAX_CHASE_PCT", "0.0015")))
+    maker_entry_fallback: str = field(default_factory=lambda: os.getenv("MAKER_ENTRY_FALLBACK", "none").strip().lower())
+    # --- cost-aware entry gate --------------------------------------------
+    min_target_to_cost_ratio: float = field(default_factory=lambda: float(os.getenv("MIN_TARGET_TO_COST_RATIO", "4.0")))
+    min_net_reward_risk: float = field(default_factory=lambda: float(os.getenv("MIN_NET_REWARD_RISK", "1.5")))
+    require_positive_expectancy: bool = field(
+        default_factory=lambda: os.getenv("REQUIRE_POSITIVE_EXPECTANCY", "true").lower() == "true"
+    )
+    # --- exits --------------------------------------------------------------
+    take_profit_mode: str = field(default_factory=lambda: os.getenv("TAKE_PROFIT_MODE", "fixed").strip().lower())
+    trail_atr_multiple: float = field(default_factory=lambda: float(os.getenv("TRAIL_ATR_MULTIPLE", "1.5")))
 
     def ensure_directories(self) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -189,6 +221,74 @@ class Settings:
             raise ValueError("DASHBOARD_REFRESH_SECONDS must be positive.")
         if self.control_refresh_seconds <= 0:
             raise ValueError("CONTROL_REFRESH_SECONDS must be positive.")
+        for name, value in (
+            ("MAKER_FEE_RATE", self.maker_fee_rate),
+            ("TAKER_FEE_RATE", self.taker_fee_rate),
+            ("ENTRY_SLIPPAGE_PCT", self.entry_slippage_pct),
+            ("EXIT_SLIPPAGE_PCT", self.exit_slippage_pct),
+        ):
+            if value < 0 or value > 0.01:
+                raise ValueError(f"{name} must be between 0 and 0.01.")
+        if self.maker_entry_timeout_bars < 0:
+            raise ValueError("MAKER_ENTRY_TIMEOUT_BARS must be non-negative.")
+        if self.maker_max_chase_pct < 0:
+            raise ValueError("MAKER_MAX_CHASE_PCT must be non-negative.")
+        if self.maker_entry_fallback not in {"none", "market"}:
+            raise ValueError("MAKER_ENTRY_FALLBACK must be either none or market.")
+        if self.min_target_to_cost_ratio < 1:
+            raise ValueError("MIN_TARGET_TO_COST_RATIO must be at least 1.")
+        if self.min_net_reward_risk < 0.5:
+            raise ValueError("MIN_NET_REWARD_RISK must be at least 0.5.")
+        if self.take_profit_mode not in {"fixed", "trail"}:
+            raise ValueError("TAKE_PROFIT_MODE must be either fixed or trail.")
+        if self.trail_atr_multiple <= 0:
+            raise ValueError("TRAIL_ATR_MULTIPLE must be positive.")
+        if self.atr_target_multiple <= self.atr_stop_multiple:
+            raise ValueError("ATR_TARGET_MULTIPLE must be greater than ATR_STOP_MULTIPLE.")
+        if self.min_backtest_expectancy_r < 0:
+            raise ValueError("MIN_BACKTEST_EXPECTANCY_R must be non-negative.")
+        round_trip = self.round_trip_cost_pct()
+        if self.break_even_trigger_pct > 0 and self.break_even_trigger_pct <= round_trip * 2:
+            raise ValueError(
+                f"BREAK_EVEN_TRIGGER_PCT must exceed twice the round-trip cost ({round_trip * 2:.5f}); "
+                "arming break-even inside the cost band locks in a guaranteed net loss."
+            )
+
+    def round_trip_cost_pct(self) -> float:
+        """Total cost of opening and closing one position, as a fraction of notional."""
+        from costs import build_cost_model
+
+        return build_cost_model(self).round_trip_pct()
+
+    def sizing_warnings(self) -> List[str]:
+        """Non-fatal configuration problems, logged once the logger is configured."""
+        warnings: List[str] = []
+        min_stop_distance = self.atr_stop_multiple * self.atr_min_pct
+        if min_stop_distance > 0:
+            wanted_notional = self.risk_per_trade / min_stop_distance
+            if wanted_notional > self.max_position_notional_pct:
+                warnings.append(
+                    f"RISK_PER_TRADE={self.risk_per_trade} implies {wanted_notional:.2f}x equity notional at the "
+                    f"minimum stop distance, but MAX_POSITION_NOTIONAL_PCT={self.max_position_notional_pct} caps it. "
+                    "The cap will bind on most trades and risk-per-trade will not govern sizing. "
+                    f"Lower RISK_PER_TRADE to about {self.max_position_notional_pct * min_stop_distance:.4f} "
+                    "or raise the notional cap."
+                )
+        from costs import build_cost_model
+
+        cost = build_cost_model(self)
+        derived_floor = max(
+            cost.min_atr_pct_for_target(self.atr_target_multiple, self.min_target_to_cost_ratio),
+            cost.min_atr_pct_for_reward_risk(
+                self.atr_target_multiple, self.atr_stop_multiple, self.min_net_reward_risk
+            ),
+        )
+        if derived_floor > self.atr_min_pct:
+            warnings.append(
+                f"Cost model implies a volatility floor of {derived_floor:.5f} ATR%, above ATR_MIN_PCT="
+                f"{self.atr_min_pct}. The derived floor governs; low-volatility setups will be rejected."
+            )
+        return warnings
 
 
 def get_settings() -> Settings:
