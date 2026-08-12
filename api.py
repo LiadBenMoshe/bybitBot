@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -34,11 +35,36 @@ class RateLimiter:
 
 
 class BybitAPIError(RuntimeError):
-    pass
+    """A failed Bybit call. `ret_code` is the exchange's retCode when known, else 0."""
+
+    def __init__(self, message: str, ret_code: int = 0) -> None:
+        super().__init__(message)
+        self.ret_code = ret_code
 
 
 class BybitLeverageNotSupported(BybitAPIError):
     pass
+
+
+# Credential/permission failures. These never recover on retry, so they short-circuit
+# the backoff loop instead of being hammered three times per call.
+AUTH_RET_CODES = frozenset({401, 10003, 10004, 10005, 10010, 33004})
+_ERRCODE_PATTERN = re.compile(r"ErrCode:\s*(\d+)")
+
+
+def extract_ret_code(exc: BaseException) -> int:
+    """Best-effort retCode for an exception raised anywhere in the pybit stack."""
+    code = getattr(exc, "ret_code", 0)
+    if code:
+        return int(code)
+    match = _ERRCODE_PATTERN.search(str(exc))
+    # pybit raises InvalidRequestError before _request can read retCode, but it
+    # embeds the code in the message text.
+    return int(match.group(1)) if match else 0
+
+
+def is_auth_error(exc: BaseException) -> bool:
+    return extract_ret_code(exc) in AUTH_RET_CODES
 
 
 @dataclass(slots=True)
@@ -63,18 +89,29 @@ class BybitClient:
 
     def _request(self, func: Callable[..., Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
         last_error: Optional[Exception] = None
+        last_ret_code = 0
         for attempt in range(1, 4):
             self.rate_limiter.wait()
             try:
                 result = func(**kwargs)
-                if result.get("retCode", 0) != 0:
-                    raise BybitAPIError(result.get("retMsg", "Unknown Bybit error"))
+                ret_code = int(result.get("retCode", 0) or 0)
+                if ret_code != 0:
+                    raise BybitAPIError(
+                        f"{result.get('retMsg', 'Unknown Bybit error')} (ErrCode: {ret_code})",
+                        ret_code=ret_code,
+                    )
                 return result
             except Exception as exc:
                 last_error = exc
+                last_ret_code = extract_ret_code(exc)
+                if is_auth_error(exc):
+                    # Expired/invalid credentials will not heal on retry; failing on the
+                    # first attempt is what keeps bot.log from filling with duplicates.
+                    self.logger.warning("Bybit credential failure: %s", exc)
+                    break
                 self.logger.warning("Bybit request attempt %s failed: %s", attempt, exc)
                 time.sleep(0.6 * attempt)
-        raise BybitAPIError(str(last_error))
+        raise BybitAPIError(str(last_error), ret_code=last_ret_code)
 
     def get_wallet_balance(self, account_type: str = "UNIFIED", coin: str = "USDT") -> float:
         result = self._request(self.http.get_wallet_balance, accountType=account_type, coin=coin)
@@ -317,6 +354,8 @@ class BybitClient:
         entry = items[0]
         return float(entry.get("makerFeeRate", 0.0)), float(entry.get("takerFeeRate", 0.0))
 
+    LEVERAGE_UNCHANGED_RET_CODE = 110043
+
     def set_leverage(self, category: str, symbol: str, leverage: int) -> None:
         if category == "spot":
             return
@@ -329,8 +368,11 @@ class BybitClient:
                 sellLeverage=str(leverage),
             )
         except BybitAPIError as exc:
+            if exc.ret_code == self.LEVERAGE_UNCHANGED_RET_CODE:
+                # The symbol is already at this leverage. Idempotent success, not a failure.
+                return
             if "pm mode cannot set leverage" in str(exc).lower():
-                raise BybitLeverageNotSupported(str(exc)) from exc
+                raise BybitLeverageNotSupported(str(exc), ret_code=exc.ret_code) from exc
             raise
 
 

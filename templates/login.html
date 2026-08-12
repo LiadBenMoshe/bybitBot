@@ -4,106 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bybit Bot Login</title>
+  {% include "_theme.css.html" %}
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #050505;
-      --panel: #121316;
-      --panel-2: #1f2126;
-      --border: #8c6a28;
-      --text: #f5ecd7;
-      --muted: #c4ae7d;
-      --accent: #d7aa43;
-      --danger: #fb7185;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: "Courier New", "Lucida Console", monospace;
-      background:
-        radial-gradient(circle at top, rgba(214, 174, 72, 0.14), transparent 32%),
-        repeating-linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.014) 0,
-          rgba(255, 255, 255, 0.014) 1px,
-          transparent 1px,
-          transparent 4px
-        ),
-        linear-gradient(180deg, #0f1012 0%, var(--bg) 100%);
-      color: var(--text);
-      display: grid;
-      place-items: center;
-      padding: 24px;
-    }
+    body { display: grid; place-items: center; padding: var(--space-5); }
     .card {
       width: min(100%, 430px);
-      background: rgba(18, 19, 22, 0.97);
+      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 217, 120, 0.05);
+      border-radius: var(--radius-md);
+      padding: var(--space-5);
+      box-shadow: var(--shadow-2);
+      position: relative;
+      z-index: 1;
     }
-    h1 {
-      margin: 0 0 10px;
-      font-size: 1.7rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      text-shadow: 0 0 12px rgba(255, 217, 120, 0.2);
-    }
-    p, label, input, button, .error, .hint, .setup, code {
-      font-family: "Courier New", "Lucida Console", monospace;
-      letter-spacing: 0.03em;
-    }
+    h1 { font-size: 1.6rem; margin-bottom: var(--space-3); text-shadow: 0 0 12px rgba(255, 217, 120, 0.2); }
     p { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
-    form { display: grid; gap: 12px; }
-    label { display: grid; gap: 6px; font-size: 0.95rem; }
-    input {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 12px 14px;
-      font-size: 1rem;
-    }
-    button {
-      border: 1px solid rgba(255, 232, 168, 0.58);
-      border-radius: 8px;
-      background: linear-gradient(180deg, rgba(255, 213, 102, 0.98), rgba(208, 149, 33, 0.98));
-      color: #1a1304;
-      font-weight: 700;
-      padding: 12px 14px;
-      font-size: 1rem;
-      cursor: pointer;
-      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26), 0 0 20px rgba(255, 204, 92, 0.18);
-    }
+    form { display: grid; gap: var(--space-3); }
+    label { display: grid; gap: var(--space-1); font-size: 0.95rem; }
     .error {
       margin-bottom: 14px;
       border: 1px solid rgba(251, 113, 133, 0.45);
       background: rgba(127, 29, 29, 0.25);
       color: #fecdd3;
-      padding: 12px;
-      border-radius: 12px;
+      padding: var(--space-3);
+      border-radius: var(--radius-md);
     }
     .hint, .setup {
-      margin-top: 16px;
+      margin-top: var(--space-4);
       padding: 14px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: rgba(25, 26, 29, 0.9);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-soft);
+      background: var(--panel-2);
+      color: var(--muted);
     }
     code {
       display: block;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
       background: rgba(14, 15, 18, 0.92);
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       padding: 10px;
       margin-top: 10px;
       color: #eceff3;
+      font-family: var(--font-num);
     }
-    img { display: block; margin: 12px auto 0; border-radius: 12px; background: white; padding: 10px; }
+    img { display: block; margin: 12px auto 0; border-radius: var(--radius-md); background: white; padding: 10px; }
   </style>
 </head>
 <body>

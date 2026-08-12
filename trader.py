@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from api import BybitClient, BybitLeverageNotSupported, MarketDataStream
+from api import BybitClient, BybitLeverageNotSupported, MarketDataStream, extract_ret_code, is_auth_error
 from config import Settings
 from costs import build_cost_model
 from logger import append_jsonl
@@ -33,7 +34,9 @@ class TraderEngine:
         )
         self.notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
         self.backtester = Backtester(settings)
-        self.lock = threading.Lock()
+        # Reentrant: the connection helpers below take the lock while callers may
+        # already hold it.
+        self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.thread: Optional[threading.Thread] = None
         self.status = "Stopped"
@@ -56,6 +59,71 @@ class TraderEngine:
         self.last_closed_at: dict[str, datetime] = {}
         self.active_symbols: list[str] = list(settings.symbols)
         self.symbol_filter_results: list[BacktestResult] = []
+        self.connection: Dict[str, Any] = {
+            "state": "paper" if settings.paper_trading else "unknown",
+            "message": "",
+            "ret_code": 0,
+            "context": "",
+            "last_success_at": "",
+            "last_failure_at": "",
+            "consecutive_failures": 0,
+            "balance_is_live": False,
+        }
+        self._refresh_backoff_until = 0.0
+
+    # ------------------------------------------------------------------
+    # exchange connection health
+    # ------------------------------------------------------------------
+    def _mark_connection_ok(self, *, balance_is_live: Optional[bool] = None) -> None:
+        if self.settings.paper_trading:
+            return
+        with self.lock:
+            previous = self.connection["state"]
+            self.connection.update(
+                state="ok",
+                message="",
+                ret_code=0,
+                context="",
+                last_success_at=datetime.now(timezone.utc).isoformat(),
+                consecutive_failures=0,
+            )
+            if balance_is_live is not None:
+                self.connection["balance_is_live"] = balance_is_live
+        if previous not in {"ok", "unknown"}:
+            self.logger.info("Bybit connection recovered (was %s).", previous)
+
+    # Contexts whose failure means the cached balance can no longer be trusted.
+    _BALANCE_CONTEXTS = frozenset({"wallet_balance", "position_refresh"})
+
+    def _mark_connection_error(self, exc: Exception, *, context: str) -> None:
+        if self.settings.paper_trading:
+            return
+        auth_failure = is_auth_error(exc)
+        state = "auth_failed" if auth_failure else "degraded"
+        # A failed set_leverage call says nothing about the balance we already read.
+        balance_is_live = False if (auth_failure or context in self._BALANCE_CONTEXTS) else None
+        with self.lock:
+            previous = self.connection["state"]
+            self.connection.update(
+                state=state,
+                message=str(exc),
+                ret_code=extract_ret_code(exc),
+                context=context,
+                last_failure_at=datetime.now(timezone.utc).isoformat(),
+                consecutive_failures=self.connection["consecutive_failures"] + 1,
+            )
+            if balance_is_live is not None:
+                self.connection["balance_is_live"] = balance_is_live
+        # Log once per state transition. Repeating the same failure every poll is
+        # what turned bot.log into thousands of identical lines.
+        if previous != state:
+            self.logger.error("Bybit connection %s during %s: %s", state, context, exc)
+        else:
+            self.logger.debug("Bybit connection still %s during %s: %s", state, context, exc)
+
+    def get_connection_summary(self) -> Dict[str, Any]:
+        with self.lock:
+            return dict(self.connection)
 
     # ------------------------------------------------------------------
     # startup
@@ -84,6 +152,22 @@ class TraderEngine:
         self.active_symbols = list(self.settings.symbols)
         for warning in self.settings.sizing_warnings():
             self.logger.warning("Config: %s", warning)
+        # Preflight the credentials before the backtest filter (~15s) so a bad key
+        # is reported in about a second, and so live mode can never fall back to a
+        # simulated balance while pretending to be real.
+        preflight_balance: Optional[float] = None
+        if not self.settings.paper_trading:
+            try:
+                preflight_balance = self.client.get_wallet_balance()
+            except Exception as exc:
+                self._mark_connection_error(exc, context="wallet_balance")
+                raise RuntimeError(
+                    f"Cannot start in live mode: Bybit rejected the wallet balance request - {exc}. "
+                    "Check BYBIT_API_KEY / BYBIT_API_SECRET in .env, or set PAPER_TRADING=true to run simulated."
+                ) from exc
+            self._mark_connection_ok(balance_is_live=True)
+            if preflight_balance == 0.0:
+                self.logger.warning("Bybit reports a zero USDT wallet balance. Position sizing will produce no trades.")
         if self.settings.filter_symbols_by_backtest:
             self.symbol_filter_results = self.backtester.run_for_symbols(self.settings.symbols)
             approved = [result.symbol for result in self.symbol_filter_results if result.passed_filter]
@@ -119,10 +203,8 @@ class TraderEngine:
                 raise RuntimeError(f"No market data returned for {symbol}.")
             self.market_history[symbol] = frame
         if not self.settings.paper_trading:
-            try:
-                self.cash_balance = self.client.get_wallet_balance()
-            except Exception as exc:
-                self.logger.warning("Wallet balance fetch failed at startup: %s", exc)
+            self.cash_balance = preflight_balance if preflight_balance is not None else self.cash_balance
+            self.logger.info("Live wallet balance: %.2f USDT", self.cash_balance)
             for symbol in self.active_symbols:
                 try:
                     self.client.set_leverage(self.settings.category, symbol, self.settings.leverage)
@@ -131,6 +213,7 @@ class TraderEngine:
                         "Leverage setup skipped for %s because the account is in portfolio margin mode: %s", symbol, exc
                     )
                 except Exception as exc:
+                    self._mark_connection_error(exc, context="set_leverage")
                     self.logger.warning("Leverage setup skipped for %s: %s", symbol, exc)
 
     def start(self) -> None:
@@ -233,6 +316,11 @@ class TraderEngine:
         with self.lock:
             existing = self.positions.get(signal.symbol)
             if signal.action == "hold":
+                return
+            if not self.settings.paper_trading and self.connection["state"] == "auth_failed":
+                # Open positions are still managed from local klines; only new
+                # exchange writes are suppressed.
+                self.logger.info("Entry skipped for %s: exchange connection unavailable.", signal.symbol)
                 return
             if self._is_entry_pause_active(signal.timestamp):
                 return
@@ -661,17 +749,31 @@ class TraderEngine:
     def _refresh_live_positions(self) -> None:
         if self.settings.paper_trading:
             return
+        if time.monotonic() < self._refresh_backoff_until:
+            return
+        # Both calls stay outside the lock: they can block for seconds while pybit
+        # retries, and snapshot requests from the web thread need the lock meanwhile.
         try:
             live_positions = self.client.get_positions(self.settings.category)
-            with self.lock:
-                for item in live_positions:
-                    symbol = item.get("symbol")
-                    size = float(item.get("size", 0) or 0)
-                    if symbol in self.positions and size != 0:
-                        self.positions[symbol].unrealized_pnl = float(item.get("unrealisedPnl", 0) or 0)
-                self.cash_balance = self.client.get_wallet_balance()
+            balance = self.client.get_wallet_balance()
         except Exception as exc:
-            self.logger.debug("Position refresh skipped: %s", exc)
+            self._mark_connection_error(exc, context="position_refresh")
+            if is_auth_error(exc):
+                # An expired key will not heal on its own; stop hammering the API.
+                self._refresh_backoff_until = time.monotonic() + 300.0
+            else:
+                failures = self.connection["consecutive_failures"]
+                self._refresh_backoff_until = time.monotonic() + min(5.0 * 2 ** failures, 120.0)
+            return
+        with self.lock:
+            for item in live_positions:
+                symbol = item.get("symbol")
+                size = float(item.get("size", 0) or 0)
+                if symbol in self.positions and size != 0:
+                    self.positions[symbol].unrealized_pnl = float(item.get("unrealisedPnl", 0) or 0)
+            self.cash_balance = balance
+        self._refresh_backoff_until = 0.0
+        self._mark_connection_ok(balance_is_live=True)
 
     def close_open_position(self, symbol: str, reason: str = "Manual close") -> dict[str, Any]:
         normalized_symbol = symbol.strip().upper()
@@ -730,6 +832,8 @@ class TraderEngine:
                 "unrealized_pnl": round(unrealized, 2),
                 "total_pnl": round(self.realized_pnl + unrealized, 2),
                 "balance": round(self.cash_balance, 2),
+                "balance_is_live": self.connection["balance_is_live"],
+                "connection": dict(self.connection),
                 "recent_trades": self.recent_trades[:20],
                 "mode": "paper" if self.settings.paper_trading else "live",
                 "symbols": self.active_symbols,
@@ -772,6 +876,8 @@ class TraderEngine:
                 "unrealized_pnl": round(unrealized, 2),
                 "total_pnl": round(self.realized_pnl + unrealized, 2),
                 "balance": round(self.cash_balance, 2),
+                "balance_is_live": self.connection["balance_is_live"],
+                "connection": dict(self.connection),
                 "last_update": datetime.now(timezone.utc).isoformat(),
                 "last_error": self.last_error,
                 **self._cost_summary(),

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from auth import AuthStore, AuthUser, create_session_token, has_permission, session_expiry, verify_session_token
 from backtest import Backtester
-from config import Settings, get_settings
+from config import EDITABLE_BY_ENV, ENV_MUTATION_LOCK, Settings, UI_EDITABLE_FIELDS, _split_symbols, build_candidate_settings, get_settings
 from logger import configure_logging
 from trader import TraderEngine
 
@@ -147,13 +147,91 @@ def _json_response(payload, status_code: int = 200) -> JSONResponse:
 
 
 def _reload_runtime_settings() -> None:
-    load_dotenv(ENV_PATH, override=True)
-    fresh_settings = get_settings()
+    with ENV_MUTATION_LOCK:
+        load_dotenv(ENV_PATH, override=True)
+        fresh_settings = get_settings()
     for field in fields(Settings):
         setattr(SETTINGS, field.name, getattr(fresh_settings, field.name))
+    # Dropping the engine while a trading thread is alive would orphan it, which is
+    # why every settings write is rejected with 409 while the bot is running.
     get_engine.cache_clear()
     get_backtester.cache_clear()
     get_auth_store.cache_clear()
+
+
+def _current_editable_values() -> dict[str, object]:
+    values: dict[str, object] = {}
+    for item in UI_EDITABLE_FIELDS:
+        current = getattr(SETTINGS, item.attr)
+        values[item.env_key] = ",".join(current) if item.kind == "symbols" else current
+    return values
+
+
+def _editable_field_specs() -> list[dict[str, object]]:
+    return [
+        {
+            "env_key": item.env_key,
+            "label": item.label,
+            "help": item.help,
+            "kind": item.kind,
+            "group": item.group,
+            "choices": list(item.choices),
+            "step": item.step,
+        }
+        for item in UI_EDITABLE_FIELDS
+    ]
+
+
+_TRUTHY = {"true", "on", "1", "yes"}
+
+
+def _coerce_editable(raw: dict[str, Optional[str]]) -> tuple[dict[str, str], dict[str, str]]:
+    """Turn submitted form strings into .env-ready strings, collecting per-field errors.
+
+    A value of None means "not submitted", which leaves the current setting alone.
+    """
+    updates: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for env_key, value in raw.items():
+        if value is None:
+            continue
+        item = EDITABLE_BY_ENV[env_key]
+        text = value.strip()
+        if item.kind == "symbols":
+            symbols = _split_symbols(text)
+            if not symbols:
+                errors[env_key] = "Enter at least one trading symbol."
+                continue
+            updates[env_key] = ",".join(symbols)
+        elif item.kind == "choice":
+            if text not in item.choices:
+                errors[env_key] = f"Choose one of: {', '.join(item.choices)}."
+                continue
+            updates[env_key] = text
+        elif item.kind == "int":
+            try:
+                updates[env_key] = str(int(text))
+            except ValueError:
+                errors[env_key] = "Enter a whole number."
+        elif item.kind == "float":
+            try:
+                updates[env_key] = repr(float(text))
+            except ValueError:
+                errors[env_key] = "Enter a number."
+        elif item.kind == "bool":
+            updates[env_key] = "true" if text.lower() in _TRUTHY else "false"
+    return updates, errors
+
+
+def _field_for_message(message: str) -> str:
+    """Map a validate() error back to the form field it belongs to.
+
+    Every message in Settings.validate() starts with the ENV key it guards.
+    """
+    for env_key in EDITABLE_BY_ENV:
+        if env_key in message:
+            return env_key
+    return "_form"
 
 
 def _update_env_values(updates: dict[str, str]) -> None:
@@ -340,62 +418,121 @@ def _authorized_session(request: Request, permission: str, action_label: str) ->
     return session.user, auth_store
 
 
+@app.get("/api/settings")
+def read_runtime_settings(request: Request) -> JSONResponse:
+    authorized = _authorized_session(request, "view_dashboard", "View Settings")
+    if isinstance(authorized, JSONResponse):
+        return authorized
+    user, _ = authorized
+    engine = get_engine()
+    locked = engine.status == "Running"
+    response = _json_response(
+        {
+            "ok": True,
+            "fields": _editable_field_specs(),
+            "values": _current_editable_values(),
+            "engine_status": engine.status,
+            "locked": locked,
+            "lock_reason": "Stop the bot before changing these." if locked else "",
+        }
+    )
+    if user:
+        _set_session_cookie(response, user, session_expiry(SETTINGS))
+    return response
+
+
 @app.post("/api/settings")
 def update_runtime_settings(
     request: Request,
-    trading_symbols: str = Form(...),
+    trading_symbols: Optional[str] = Form(None),
+    timeframe: Optional[str] = Form(None),
+    risk_per_trade: Optional[str] = Form(None),
+    default_leverage: Optional[str] = Form(None),
+    max_open_positions: Optional[str] = Form(None),
+    max_consecutive_losses: Optional[str] = Form(None),
+    initial_balance: Optional[str] = Form(None),
     invert_signals: Optional[str] = Form(None),
 ) -> JSONResponse:
     authorized = _authorized_session(request, "start_bot", "Update Settings")
     if isinstance(authorized, JSONResponse):
         return authorized
     user, auth_store = authorized
+
+    def finish(payload: dict, status_code: int = 200) -> JSONResponse:
+        response = _json_response(payload, status_code=status_code)
+        if user:
+            _set_session_cookie(response, user, session_expiry(SETTINGS))
+        return response
+
     engine = get_engine()
     if engine.status == "Running":
-        response = _json_response(
-            {"error": "Stop the bot before changing TRADING_SYMBOLS or INVERT_SIGNALS."},
+        return finish(
+            {
+                "ok": False,
+                "error": "Stop the bot before changing trading settings.",
+                "locked": True,
+            },
             status_code=409,
         )
-        if user:
-            _set_session_cookie(response, user, session_expiry(SETTINGS))
-        return response
 
-    normalized_symbols = ",".join(symbol.strip().upper() for symbol in trading_symbols.split(",") if symbol.strip())
-    if not normalized_symbols:
-        response = _json_response({"error": "Enter at least one trading symbol."}, status_code=400)
-        if user:
-            _set_session_cookie(response, user, session_expiry(SETTINGS))
-        return response
+    submitted = {
+        "TRADING_SYMBOLS": trading_symbols,
+        "TIMEFRAME": timeframe,
+        "RISK_PER_TRADE": risk_per_trade,
+        "DEFAULT_LEVERAGE": default_leverage,
+        "MAX_OPEN_POSITIONS": max_open_positions,
+        "MAX_CONSECUTIVE_LOSSES": max_consecutive_losses,
+        "INITIAL_BALANCE": initial_balance,
+        "INVERT_SIGNALS": invert_signals,
+    }
+    updates, field_errors = _coerce_editable(submitted)
 
-    normalized_invert = "true" if invert_signals == "true" else "false"
-    _update_env_values(
-        {
-            "TRADING_SYMBOLS": normalized_symbols,
-            "INVERT_SIGNALS": normalized_invert,
-        }
-    )
+    def reject(errors: dict[str, str]) -> JSONResponse:
+        if user:
+            auth_store.log_event(
+                "settings_rejected",
+                success=False,
+                username=user.username,
+                details={"errors": errors},
+            )
+        return finish(
+            {"ok": False, "error": "Some values were rejected.", "field_errors": errors},
+            status_code=400,
+        )
+
+    if field_errors:
+        return reject(field_errors)
+    if not updates:
+        return finish({"ok": False, "error": "Nothing to save."}, status_code=400)
+
+    # Validate the candidate set before touching .env, so a bad value never lands
+    # in the file and the next start cannot fail on something the UI accepted.
+    try:
+        build_candidate_settings(updates)
+    except ValueError as exc:
+        return reject({_field_for_message(str(exc)): str(exc)})
+
+    current = _current_editable_values()
+    changed = [key for key, value in updates.items() if str(current.get(key)).lower() != value.lower()]
+
+    _update_env_values(updates)
     _reload_runtime_settings()
+
     if user:
         auth_store.log_event(
             "settings_updated",
             success=True,
             username=user.username,
-            details={
-                "TRADING_SYMBOLS": normalized_symbols,
-                "INVERT_SIGNALS": normalized_invert,
-            },
+            details={key: updates[key] for key in changed},
         )
-    response = _json_response(
+    return finish(
         {
             "ok": True,
-            "message": "Settings saved. The new values will be used on the next bot start.",
-            "symbols": SETTINGS.symbols,
-            "invert_signals": SETTINGS.invert_signals,
+            "message": "Settings saved. They take effect the next time the bot starts.",
+            "values": _current_editable_values(),
+            "changed": changed,
         }
     )
-    if user:
-        _set_session_cookie(response, user, session_expiry(SETTINGS))
-    return response
 
 
 @app.get("/api/control_snapshot")

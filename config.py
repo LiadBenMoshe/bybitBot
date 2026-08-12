@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -159,6 +160,12 @@ class Settings:
             raise ValueError("BREAK_EVEN_TRIGGER_PCT and BREAK_EVEN_OFFSET_PCT must be non-negative.")
         if self.max_consecutive_losses < 0:
             raise ValueError("MAX_CONSECUTIVE_LOSSES must be non-negative.")
+        if self.leverage < 1 or self.leverage > 100:
+            raise ValueError("DEFAULT_LEVERAGE must be between 1 and 100.")
+        if self.max_positions < 1:
+            raise ValueError("MAX_OPEN_POSITIONS must be at least 1.")
+        if self.initial_balance <= 0:
+            raise ValueError("INITIAL_BALANCE must be positive.")
         if self.cooldown_after_loss_bars < 0:
             raise ValueError("COOLDOWN_AFTER_LOSS_BARS must be non-negative.")
         if not self.symbols:
@@ -289,6 +296,90 @@ class Settings:
                 f"{self.atr_min_pct}. The derived floor governs; low-volatility setups will be rejected."
             )
         return warnings
+
+
+@dataclass(frozen=True, slots=True)
+class EditableField:
+    """One setting the web UI is allowed to write back into .env."""
+
+    env_key: str
+    attr: str
+    kind: str  # symbols | choice | int | float | bool
+    label: str
+    help: str
+    group: str
+    choices: Tuple[str, ...] = ()
+    step: str = ""
+
+
+TIMEFRAME_CHOICES: Tuple[str, ...] = ("5", "15", "30", "60", "240", "D")
+
+# The single source of truth for the Settings tab. Adding a field here is all it
+# takes for it to render, validate and persist - as long as validate() has a rule
+# for it, which is where the error message the UI shows comes from.
+UI_EDITABLE_FIELDS: Tuple[EditableField, ...] = (
+    EditableField(
+        "TRADING_SYMBOLS", "symbols", "symbols", "Trading symbols",
+        "Comma separated, e.g. BTCUSDT,ETHUSDT.", "Market",
+    ),
+    EditableField(
+        "TIMEFRAME", "timeframe", "choice", "Timeframe",
+        "Candle interval in minutes (D = daily).", "Market", choices=TIMEFRAME_CHOICES,
+    ),
+    EditableField(
+        "RISK_PER_TRADE", "risk_per_trade", "float", "Risk per trade",
+        "Fraction of equity risked per position. Max 0.05.", "Risk", step="0.001",
+    ),
+    EditableField(
+        "DEFAULT_LEVERAGE", "leverage", "int", "Leverage",
+        "Applied to every symbol at startup. 1-100.", "Risk",
+    ),
+    EditableField(
+        "MAX_OPEN_POSITIONS", "max_positions", "int", "Max open positions",
+        "How many symbols can hold a position at once.", "Risk",
+    ),
+    EditableField(
+        "MAX_CONSECUTIVE_LOSSES", "max_consecutive_losses", "int", "Max consecutive losses",
+        "New entries pause after this many losers. 0 disables the pause.", "Risk",
+    ),
+    EditableField(
+        "INITIAL_BALANCE", "initial_balance", "float", "Initial balance",
+        "Paper-mode starting equity only. In live mode the balance comes from Bybit.",
+        "Account", step="0.01",
+    ),
+    EditableField(
+        "INVERT_SIGNALS", "invert_signals", "bool", "Invert signals",
+        "Flips long/short inside the strategy, before exits are priced.", "Behaviour",
+    ),
+)
+
+EDITABLE_BY_ENV: Dict[str, EditableField] = {item.env_key: item for item in UI_EDITABLE_FIELDS}
+
+# Serialises the temporary os.environ mutation below against _reload_runtime_settings,
+# since both run on request threads and both touch process-global state.
+ENV_MUTATION_LOCK = threading.Lock()
+
+
+def build_candidate_settings(overrides: Dict[str, str]) -> Settings:
+    """Validate `overrides` as if they were already in the environment.
+
+    Runs the full existing validate() rule set - including the cross-field rules -
+    without writing to .env, so a rejected value never reaches the file.
+    Deliberately does not call ensure_directories(): this must have no side effects.
+    """
+    with ENV_MUTATION_LOCK:
+        previous: Dict[str, Optional[str]] = {key: os.environ.get(key) for key in overrides}
+        try:
+            os.environ.update(overrides)
+            candidate = Settings()
+            candidate.validate()
+            return candidate
+        finally:
+            for key, old in previous.items():
+                if old is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = old
 
 
 def get_settings() -> Settings:
