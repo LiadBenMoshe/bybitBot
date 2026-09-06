@@ -25,8 +25,9 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from backtest import Backtester
+from backtest import Backtester, BacktestResult
 from config import Settings, get_settings
+from kline_cache import load_klines
 from strategy import build_strategy
 
 
@@ -41,16 +42,38 @@ class WalkForward:
         self.window = total_candles // segments
         self.raw: dict[str, pd.DataFrame] = {}
 
-    def fetch(self) -> None:
+    def fetch(self, use_cache: bool = True, refresh: bool = False) -> None:
+        """Load history for every symbol and align them on shared timestamps.
+
+        Windows are positional, so symbols with a shorter listing (or missing
+        candles) would otherwise be scored over different dates than the rest.
+        Every symbol is trimmed to the timestamps they all share, and the window
+        length is recomputed from that common length.
+        """
         settings = get_settings()
         client = Backtester(settings).client
         for symbol in self.symbols:
-            self.raw[symbol] = client.get_kline_history(
-                settings.category, symbol, self.timeframe, self.total
-            )
+            if use_cache:
+                self.raw[symbol] = load_klines(
+                    client, settings.category, symbol, self.timeframe, self.total, refresh=refresh
+                )
+            else:
+                self.raw[symbol] = client.get_kline_history(settings.category, symbol, self.timeframe, self.total)
+        common = None
+        for frame in self.raw.values():
+            stamps = set(frame["timestamp"])
+            common = stamps if common is None else common & stamps
+        assert common, "No shared timestamps across symbols"
+        for symbol, frame in self.raw.items():
+            aligned = frame[frame["timestamp"].isin(common)].sort_values("timestamp").reset_index(drop=True)
+            self.raw[symbol] = aligned
+        lengths = {len(frame) for frame in self.raw.values()}
+        assert len(lengths) == 1, f"Symbols still misaligned after trimming: {lengths}"
+        self.total = lengths.pop()
+        self.window = self.total // self.segments
         sample = self.raw[self.symbols[0]]
         print(
-            f"  {len(sample)} candles  {sample['timestamp'].iloc[0]:%Y-%m-%d}"
+            f"  {len(sample)} shared candles  {sample['timestamp'].iloc[0]:%Y-%m-%d}"
             f" -> {sample['timestamp'].iloc[-1]:%Y-%m-%d}"
         )
 
@@ -58,32 +81,59 @@ class WalkForward:
         start = segment * self.window
         return self.raw[symbol].iloc[start:start + self.window].reset_index(drop=True)
 
+    def build_settings(self, overrides: Optional[dict] = None) -> Settings:
+        """Fresh Settings with overrides applied; validation problems are printed, not raised.
+
+        Research may deliberately explore values outside the live limits, but a
+        candidate that violates a cross-field rule (target below stop, break-even
+        inside the cost band) is usually a mistake, so say so loudly.
+        """
+        settings = get_settings()
+        settings.timeframe = self.timeframe
+        for key, value in (overrides or {}).items():
+            if not hasattr(settings, key):
+                raise AttributeError(f"Unknown settings override: {key}")
+            setattr(settings, key, value)
+        try:
+            settings.validate()
+        except ValueError as exc:
+            print(f"  [validate] {exc}")
+        return settings
+
+    def evaluate_detailed(
+        self,
+        overrides: Optional[dict] = None,
+        strategy_factory: Optional[Callable[[Settings], object]] = None,
+        segments: Optional[list[int]] = None,
+        symbols: Optional[list[str]] = None,
+        collect_trades: bool = False,
+    ) -> list[list[BacktestResult]]:
+        """Replay every window and return the full result per window and symbol."""
+        settings = self.build_settings(overrides)
+        basket = symbols or self.symbols
+        results: list[list[BacktestResult]] = []
+        for segment in segments if segments is not None else range(self.segments):
+            bt = Backtester(settings)
+            bt.collect_trades = collect_trades
+            if strategy_factory is not None:
+                bt.strategy = strategy_factory(settings)
+            bt.client.get_kline_history = (
+                lambda category, symbol, interval, total, _s=segment: self._slice(symbol, _s)
+            )
+            results.append([bt.run(symbol, candles=self.window) for symbol in basket])
+        return results
+
     def evaluate(
         self,
         overrides: Optional[dict] = None,
         strategy_factory: Optional[Callable[[Settings], object]] = None,
     ) -> tuple[list[float], int]:
         """Return (net % per symbol for each window, total trades)."""
-        settings = get_settings()
-        settings.timeframe = self.timeframe
-        for key, value in (overrides or {}).items():
-            setattr(settings, key, value)
-
         nets: list[float] = []
         trades = 0
-        for segment in range(self.segments):
-            bt = Backtester(settings)
-            if strategy_factory is not None:
-                bt.strategy = strategy_factory(settings)
-            bt.client.get_kline_history = (
-                lambda category, symbol, interval, total, _s=segment: self._slice(symbol, _s)
-            )
-            net = 0.0
-            for symbol in self.symbols:
-                result = bt.run(symbol, candles=self.window)
-                net += result.total_return_pct
-                trades += result.trades
-            nets.append(net / len(self.symbols))
+        for window in self.evaluate_detailed(overrides, strategy_factory):
+            nets.append(sum(r.total_return_pct for r in window) / len(window))
+            trades += sum(r.trades for r in window)
         return nets, trades
 
     def buy_and_hold(self) -> tuple[list[float], int]:

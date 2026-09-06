@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -152,6 +152,15 @@ class IndicatorStrategy:
         df = frame if indicators_ready else self.apply_indicators(frame)
         latest = df.iloc[-1]
         previous = df.iloc[-2] if len(df) > 1 else latest
+        return self.signal_from_rows(symbol, latest, previous)
+
+    def signal_from_rows(self, symbol: str, latest: Any, previous: Any) -> Signal:
+        """Score the newest bar given its indicator row and the one before it.
+
+        ``latest``/``previous`` may be pandas rows or plain dicts (the backtester
+        passes dicts so it does not rebuild a mixed-dtype Series on every bar).
+        The decision only ever depends on these two rows.
+        """
         long_score = 0
         short_score = 0
         reasons: list[str] = []
@@ -349,8 +358,6 @@ class IndicatorStrategy:
 
         action = "hold"
         confidence = 0.0
-        stop_loss = None
-        take_profit = None
         if long_score >= self.config.signal_score_threshold and long_score > short_score and (breakout_up or pullback_long):
             action = "buy"
             confidence = min(long_score / 10, 1.0)
@@ -375,6 +382,32 @@ class IndicatorStrategy:
                 confidence = 0.0
                 reasons.append("Confidence too low")
 
+        return self._finalize_signal(symbol, latest, action, confidence, reasons)
+
+    def _finalize_signal(
+        self,
+        symbol: str,
+        latest: Any,
+        action: str,
+        confidence: float,
+        reasons: list[str],
+        stop_multiple: float | None = None,
+        target_multiple: float | None = None,
+    ) -> Signal:
+        """Invert, price the exits and run the cost gate on a proposed action.
+
+        Shared by every strategy variant so a Signal is always self-consistent:
+        inversion happens *before* exits are priced (the stop must sit on the
+        losing side of the position actually taken), and the gate prices the
+        trade that will really be placed. ``stop_multiple``/``target_multiple``
+        default to the configured ATR multiples; a variant whose target is a
+        price level (a mean, a channel edge) passes its own multiple instead.
+        """
+        stop_loss = None
+        take_profit = None
+        stop_mult = self.config.atr_stop_multiple if stop_multiple is None else stop_multiple
+        target_mult = self.config.atr_target_multiple if target_multiple is None else target_multiple
+
         # Contrarian mode flips the side *before* exits are priced, so the stop
         # always sits on the losing side of the position actually taken.
         if self.config.invert_signals and action != "hold":
@@ -385,18 +418,13 @@ class IndicatorStrategy:
         # that will actually be taken rather than a heuristic proxy for it.
         if action != "hold":
             atr = 0.0 if isna(latest["atr"]) else float(latest["atr"])
-            if atr <= 0:
+            atr_pct = latest["atr_pct"]
+            if atr <= 0 or isna(atr_pct):
                 action = "hold"
                 confidence = 0.0
                 reasons.append("ATR unavailable for exit sizing")
             else:
-                edge = assess_edge(
-                    self.cost,
-                    float(atr_pct),
-                    self.config.atr_stop_multiple,
-                    self.config.atr_target_multiple,
-                    confidence,
-                )
+                edge = assess_edge(self.cost, float(atr_pct), stop_mult, target_mult, confidence)
                 veto = self._veto_edge(edge)
                 if veto:
                     action = "hold"
@@ -406,11 +434,11 @@ class IndicatorStrategy:
                     reasons.append(edge.describe())
                     close_price = float(latest["close"])
                     if action == "buy":
-                        stop_loss = close_price - atr * self.config.atr_stop_multiple
-                        take_profit = close_price + atr * self.config.atr_target_multiple
+                        stop_loss = close_price - atr * stop_mult
+                        take_profit = close_price + atr * target_mult
                     else:
-                        stop_loss = close_price + atr * self.config.atr_stop_multiple
-                        take_profit = close_price - atr * self.config.atr_target_multiple
+                        stop_loss = close_price + atr * stop_mult
+                        take_profit = close_price - atr * target_mult
 
         return Signal(
             symbol=symbol,
@@ -466,6 +494,16 @@ def build_strategy_config(settings: "Settings") -> StrategyConfig:
 
 
 def build_strategy(settings: "Settings") -> IndicatorStrategy:
-    """Single construction point so trader and backtester share identical wiring."""
+    """Single construction point so trader and backtester share identical wiring.
+
+    ``STRATEGY_NAME`` selects the variant; the research module is imported
+    lazily because it subclasses ``IndicatorStrategy`` and would otherwise form
+    an import cycle.
+    """
+    name = getattr(settings, "strategy_name", "indicator")
+    if name and name != "indicator":
+        from strategies_research import build_named_strategy
+
+        return build_named_strategy(name, settings)
     return IndicatorStrategy(build_strategy_config(settings), build_cost_model(settings))
 

@@ -23,6 +23,9 @@ def _float_env(primary: str, default: str, fallback: str = "") -> float:
     return float(raw if raw is not None else default)
 
 
+STRATEGY_NAMES: tuple[str, ...] = ("indicator", "htf_trend", "mean_reversion")
+
+
 @dataclass(slots=True)
 class Settings:
     api_key: str = field(default_factory=lambda: os.getenv("BYBIT_API_KEY", ""))
@@ -131,6 +134,13 @@ class Settings:
     # --- exits --------------------------------------------------------------
     take_profit_mode: str = field(default_factory=lambda: os.getenv("TAKE_PROFIT_MODE", "fixed").strip().lower())
     trail_atr_multiple: float = field(default_factory=lambda: float(os.getenv("TRAIL_ATR_MULTIPLE", "1.5")))
+    # 0 disables the time stop; otherwise a position is closed at the close of its Nth bar.
+    max_bars_held: int = field(default_factory=lambda: int(os.getenv("MAX_BARS_HELD", "0")))
+    # --- simulator realism (backtest only) ----------------------------------
+    liquidation_mmr: float = field(default_factory=lambda: float(os.getenv("LIQUIDATION_MMR", "0.005")))
+    funding_rate_per_8h: float = field(default_factory=lambda: float(os.getenv("FUNDING_RATE_PER_8H", "0.0001")))
+    # --- strategy selection ---------------------------------------------------
+    strategy_name: str = field(default_factory=lambda: os.getenv("STRATEGY_NAME", "indicator").strip().lower())
 
     def ensure_directories(self) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -254,6 +264,20 @@ class Settings:
             raise ValueError("ATR_TARGET_MULTIPLE must be greater than ATR_STOP_MULTIPLE.")
         if self.min_backtest_expectancy_r < 0:
             raise ValueError("MIN_BACKTEST_EXPECTANCY_R must be non-negative.")
+        if self.max_bars_held < 0:
+            raise ValueError("MAX_BARS_HELD must be non-negative (0 disables the time stop).")
+        if self.liquidation_mmr < 0 or self.liquidation_mmr >= 0.1:
+            raise ValueError("LIQUIDATION_MMR must be between 0 and 0.1.")
+        if self.funding_rate_per_8h < 0 or self.funding_rate_per_8h > 0.01:
+            raise ValueError("FUNDING_RATE_PER_8H must be between 0 and 0.01.")
+        if self.strategy_name not in STRATEGY_NAMES:
+            raise ValueError(f"STRATEGY_NAME must be one of {', '.join(STRATEGY_NAMES)}.")
+        if self.max_position_notional_pct > 0.8 * self.leverage:
+            raise ValueError(
+                f"MAX_POSITION_NOTIONAL_PCT={self.max_position_notional_pct} needs more margin than "
+                f"DEFAULT_LEVERAGE={self.leverage} allows; keep it at or below {0.8 * self.leverage:.2f}x "
+                "(80% of leverage) so the order can be funded and liquidation stays clear of the stop."
+            )
         round_trip = self.round_trip_cost_pct()
         if self.break_even_trigger_pct > 0 and self.break_even_trigger_pct <= round_trip * 2:
             raise ValueError(

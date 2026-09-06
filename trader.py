@@ -693,8 +693,6 @@ class TraderEngine:
         position = self.positions.get(symbol)
         if position:
             position.unrealized_pnl = self._compute_pnl(position, price)
-            position.peak_price = max(position.peak_price, price)
-            position.trough_price = min(position.trough_price, price)
 
     def _update_protective_stop(self, position: Position) -> None:
         round_trip = self.cost.round_trip_pct()
@@ -744,6 +742,18 @@ class TraderEngine:
                 self._close_position(symbol, position.take_profit, "Take profit")
                 return
         position.bars_held += 1
+        # Time stop: counted from the first closed bar after the fill, exactly as
+        # the backtester counts it, so both engines exit on the same bar.
+        if self.settings.max_bars_held > 0 and position.bars_held >= self.settings.max_bars_held:
+            self._close_position(symbol, float(event.close), "Time stop")
+            return
+        # Peak/trough come from the bar's range and are updated only *after* the
+        # stop test, mirroring Backtester._advance_protective_stop: a stop raised
+        # by this bar's own high must not be able to rescue the position within
+        # the same bar. (They used to track the close, before the test, which
+        # made paper trailing exits differ from the backtest.)
+        position.peak_price = max(position.peak_price, high)
+        position.trough_price = min(position.trough_price, low)
         self._update_protective_stop(position)
 
     def _refresh_live_positions(self) -> None:
