@@ -337,6 +337,8 @@
       <div class="runrow">
         <button id="start-btn" class="primary" type="button">Start Bot</button>
         <button id="stop-btn" class="danger" type="button">Stop Bot</button>
+        <button id="export-csv-btn" class="ghost" type="button">Download CSV</button>
+        <button id="export-json-btn" class="ghost" type="button">Download JSON</button>
         <span id="last-update"></span>
       </div>
     </section>
@@ -963,6 +965,47 @@
       }
       scheduleNext(0);
     });
+
+    // Full trade history comes from trades.jsonl on the server, not the
+    // 20-row snapshot list. fetch() rather than navigation so 401/403/404
+    // follow the same conventions as every other action.
+    async function downloadTrades(format, button) {
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/trades/export?format=" + encodeURIComponent(format), {
+          credentials: "same-origin",
+        });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || "Export failed (" + response.status + ").");
+        }
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const match = /filename="([^"]+)"/.exec(disposition);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = el("a");
+        link.href = url;
+        link.download = match ? match[1] : "positions." + format;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        toast("Trade history downloaded.", "good");
+      } catch (err) {
+        toast(err.message, "bad");
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    const exportCsvBtn = document.getElementById("export-csv-btn");
+    const exportJsonBtn = document.getElementById("export-json-btn");
+    exportCsvBtn.addEventListener("click", () => downloadTrades("csv", exportCsvBtn));
+    exportJsonBtn.addEventListener("click", () => downloadTrades("json", exportJsonBtn));
 
     // One delegated handler; the old code rebound every button after each render.
     document.getElementById("positions-list").addEventListener("click", async (event) => {

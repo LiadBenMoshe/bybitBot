@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Form, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
@@ -19,6 +19,7 @@ from backtest import Backtester
 from config import EDITABLE_BY_ENV, ENV_MUTATION_LOCK, Settings, UI_EDITABLE_FIELDS, _split_symbols, build_candidate_settings, get_settings
 from logger import configure_logging
 from trader import TraderEngine
+import trade_history
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -55,7 +56,7 @@ def _default_view_path() -> str:
     return "/control" if SETTINGS.mobile_default_view else "/dashboard"
 
 
-def _set_session_cookie(response: RedirectResponse | HTMLResponse | JSONResponse, user: AuthUser, expires_at: datetime) -> None:
+def _set_session_cookie(response: Response, user: AuthUser, expires_at: datetime) -> None:
     token = create_session_token(SETTINGS, user, expires_at)
     max_age = max(0, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
     response.set_cookie(
@@ -437,6 +438,45 @@ def read_runtime_settings(request: Request) -> JSONResponse:
         }
     )
     if user:
+        _set_session_cookie(response, user, session_expiry(SETTINGS))
+    return response
+
+
+@app.get("/api/trades/export", response_model=None)
+def export_trades(request: Request, format: str = "csv", raw: int = 0) -> Response:
+    """Download the full trade history from ``trades.jsonl``.
+
+    Default is one row per position (open and close paired); ``raw=1`` returns
+    the log records as written. Reads the file, not engine memory, so it needs
+    no lock and is allowed while the bot is running.
+    """
+    authorized = _authorized_session(request, "view_dashboard", "Export Trades")
+    if isinstance(authorized, JSONResponse):
+        return authorized
+    user, auth_store = authorized
+    fmt = "json" if format.lower() == "json" else "csv"
+    rows = trade_history.read_trade_rows(SETTINGS.trade_log_path)
+    if not rows:
+        return _json_response({"ok": False, "error": "No trades recorded yet."}, status_code=404)
+    if raw:
+        columns, data, label = trade_history.RAW_COLUMNS, rows, "trade_log"
+    else:
+        columns, data, label = trade_history.POSITION_COLUMNS, trade_history.pair_positions(rows), "positions"
+    body = trade_history.to_csv(columns, data) if fmt == "csv" else trade_history.to_json(columns, data)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"{label}-{stamp}.{fmt}"
+    response = Response(
+        content=body,
+        media_type="text/csv; charset=utf-8" if fmt == "csv" else "application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+    if user:
+        auth_store.log_event(
+            "trades_exported",
+            success=True,
+            username=user.username,
+            details={"format": fmt, "raw": bool(raw), "rows": len(data)},
+        )
         _set_session_cookie(response, user, session_expiry(SETTINGS))
     return response
 
