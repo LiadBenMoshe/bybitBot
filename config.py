@@ -23,7 +23,7 @@ def _float_env(primary: str, default: str, fallback: str = "") -> float:
     return float(raw if raw is not None else default)
 
 
-STRATEGY_NAMES: tuple[str, ...] = ("indicator", "htf_trend", "mean_reversion")
+STRATEGY_NAMES: tuple[str, ...] = ("indicator", "htf_trend", "mean_reversion", "momentum")
 
 
 @dataclass(slots=True)

@@ -92,6 +92,52 @@ class HTFTrendBreakout(IndicatorStrategy):
 
 
 # ---------------------------------------------------------------------------
+# D. fast EMA-cross momentum
+# ---------------------------------------------------------------------------
+class MomentumCross(IndicatorStrategy):
+    """Enter on a fresh EMA fast/slow cross in the direction of the trend EMA.
+
+    Deliberately light on filters so it trades several times a day on 15m bars:
+    only the cross, the trend side, an RSI band and the cost-derived ATR floor.
+    Exits and the cost gate come from ``_finalize_signal`` unchanged.
+    """
+
+    assumed_p = 0.45
+
+    def signal_from_rows(self, symbol: str, latest: Any, previous: Any) -> Signal:
+        fast, slow, trend, rsi, atr = (
+            latest["ema_fast"], latest["ema_slow"], latest["trend_ema"], latest["rsi"], latest["atr"]
+        )
+        prev_fast, prev_slow = previous["ema_fast"], previous["ema_slow"]
+        if any(isna(v) for v in (fast, slow, trend, rsi, atr, prev_fast, prev_slow)):
+            return _hold(symbol, latest, "Warming up")
+        atr_pct = latest["atr_pct"]
+        floor = self.min_atr_pct()
+        if isna(atr_pct) or atr_pct < floor:
+            return _hold(symbol, latest, f"ATR below floor {floor * 100:.3f}%")
+        close = float(latest["close"])
+        action = "hold"
+        reasons: list[str] = []
+        if (
+            prev_fast <= prev_slow
+            and fast > slow
+            and close > trend
+            and self.config.rsi_long_threshold <= rsi <= self.config.max_rsi_long
+        ):
+            action, reasons = "buy", ["EMA cross up", "Above trend EMA", f"RSI {rsi:.0f}"]
+        elif (
+            prev_fast >= prev_slow
+            and fast < slow
+            and close < trend
+            and self.config.min_rsi_short <= rsi <= self.config.rsi_short_threshold
+        ):
+            action, reasons = "sell", ["EMA cross down", "Below trend EMA", f"RSI {rsi:.0f}"]
+        if action == "hold":
+            return _hold(symbol, latest, "No EMA cross")
+        return self._finalize_signal(symbol, latest, action, self.assumed_p, reasons)
+
+
+# ---------------------------------------------------------------------------
 # C. mean reversion
 # ---------------------------------------------------------------------------
 class MeanReversion60(IndicatorStrategy):
@@ -211,6 +257,8 @@ def build_named_strategy(name: str, settings: "Settings") -> IndicatorStrategy:
         return HTFTrendBreakout(config, cost)
     if name == "mean_reversion":
         return MeanReversion60(config, cost)
+    if name == "momentum":
+        return MomentumCross(config, cost)
     raise ValueError(f"Unknown STRATEGY_NAME {name!r}")
 
 
@@ -264,6 +312,20 @@ _C = {
     "min_net_reward_risk": 1.0,
     "cooldown_bars": 2,
 }
+_D = {
+    "invert_signals": False,
+    "atr_stop_multiple": 1.5,
+    "atr_target_multiple": 3.0,
+    "atr_min_pct": 0.0015,
+    "min_target_to_cost_ratio": 2.0,
+    "min_net_reward_risk": 1.0,
+    "min_expected_move_pct": 0.002,
+    "rsi_long_threshold": 50,
+    "rsi_short_threshold": 50,
+    "max_rsi_long": 75,
+    "min_rsi_short": 25,
+    "cooldown_bars": 1,
+}
 
 CANDIDATES: list[Candidate] = [
     Candidate("shipped_as_configured", "baseline", {}, note="current .env (inverted, stop 1.0 / target 2.4)"),
@@ -281,6 +343,7 @@ CANDIDATES: list[Candidate] = [
     Candidate("B2_htf_trend_taker", "B", {**_B, "maker_entry_enabled": False}, strategy_factory=_factory("htf_trend")),
     Candidate("C1_mean_rev_maker", "C", dict(_C), strategy_factory=_factory("mean_reversion")),
     Candidate("C2_mean_rev_taker", "C", {**_C, "maker_entry_enabled": False}, strategy_factory=_factory("mean_reversion")),
+    Candidate("D1_momentum_cross", "D", dict(_D), strategy_factory=_factory("momentum")),
 ]
 
 # Round 2 is built at runtime from the round-1 winner; these are the wrappers it can use.
