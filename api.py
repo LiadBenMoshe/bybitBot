@@ -50,6 +50,10 @@ class BybitLeverageNotSupported(BybitAPIError):
 # the backoff loop instead of being hammered three times per call.
 AUTH_RET_CODES = frozenset({401, 10003, 10004, 10005, 10010, 33004})
 _ERRCODE_PATTERN = re.compile(r"ErrCode:\s*(\d+)")
+# Request-parameter rejections (e.g. positionIdx vs position mode). Resending the
+# identical request cannot succeed, so these also skip the backoff loop.
+NON_RETRYABLE_RET_CODES = frozenset({10001})
+POSITION_IDX_MISMATCH = "position idx not match position mode"
 
 
 def extract_ret_code(exc: BaseException) -> int:
@@ -86,6 +90,8 @@ class BybitClient:
         self.http = HTTP(testnet=testnet, api_key=api_key, api_secret=api_secret)
         self.testnet = testnet
         self.instrument_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        # True = hedge mode (positionIdx 1/2), False = one-way (positionIdx 0).
+        self.hedge_mode_cache: dict[tuple[str, str], bool] = {}
 
     def _request(self, func: Callable[..., Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
         last_error: Optional[Exception] = None
@@ -108,6 +114,9 @@ class BybitClient:
                     # Expired/invalid credentials will not heal on retry; failing on the
                     # first attempt is what keeps bot.log from filling with duplicates.
                     self.logger.warning("Bybit credential failure: %s", exc)
+                    break
+                if last_ret_code in NON_RETRYABLE_RET_CODES:
+                    self.logger.warning("Bybit rejected request: %s", exc)
                     break
                 self.logger.warning("Bybit request attempt %s failed: %s", attempt, exc)
                 time.sleep(0.6 * attempt)
@@ -250,6 +259,55 @@ class BybitClient:
             raise BybitAPIError(f"Normalized quantity for {symbol} is not tradable.")
         return float(normalized)
 
+    def _is_hedge_mode(self, category: str, symbol: str) -> bool:
+        """Whether the account holds `symbol` in hedge (two-way) position mode.
+
+        Bybit returns one position row per side in hedge mode (positionIdx 1 and 2)
+        and a single row with positionIdx 0 in one-way mode, even when flat.
+        """
+        if category == "spot":
+            return False
+        key = (category, symbol)
+        if key not in self.hedge_mode_cache:
+            rows = self.get_positions(category, symbol)
+            self.hedge_mode_cache[key] = any(int(row.get("positionIdx", 0) or 0) in (1, 2) for row in rows)
+        return self.hedge_mode_cache[key]
+
+    def _position_idx(self, category: str, symbol: str, side: str, reduce_only: bool) -> int:
+        if not self._is_hedge_mode(category, symbol):
+            return 0
+        opens_long = side.lower() == "buy"
+        # A reduce-only order closes the opposite leg: Sell closes the long (1), Buy the short (2).
+        is_long_leg = opens_long != reduce_only
+        return 1 if is_long_leg else 2
+
+    def _place_order(self, category: str, symbol: str, side: str, reduce_only: bool, **params: Any) -> dict[str, Any]:
+        def send() -> dict[str, Any]:
+            extra: Dict[str, Any] = {}
+            if category != "spot":
+                extra["positionIdx"] = self._position_idx(category, symbol, side, reduce_only)
+            return self._request(
+                self.http.place_order,
+                category=category,
+                symbol=symbol,
+                side=side,
+                reduceOnly=reduce_only,
+                **params,
+                **extra,
+            )
+
+        try:
+            return send()
+        except BybitAPIError as exc:
+            if POSITION_IDX_MISMATCH not in str(exc).lower():
+                raise
+            # The position mode changed since it was cached (e.g. toggled in the
+            # Bybit UI); flip it once and resend.
+            key = (category, symbol)
+            self.hedge_mode_cache[key] = not self.hedge_mode_cache.get(key, False)
+            self.logger.warning("Position mode for %s changed; retrying with hedge_mode=%s", symbol, self.hedge_mode_cache[key])
+            return send()
+
     def place_market_order(
         self,
         category: str,
@@ -259,14 +317,13 @@ class BybitClient:
         reduce_only: bool = False,
     ) -> dict[str, Any]:
         normalized_qty = self.normalize_order_qty(category, symbol, qty)
-        return self._request(
-            self.http.place_order,
-            category=category,
-            symbol=symbol,
-            side=side,
+        return self._place_order(
+            category,
+            symbol,
+            side,
+            reduce_only,
             orderType="Market",
             qty=_decimal_to_string(normalized_qty),
-            reduceOnly=reduce_only,
             timeInForce="IOC",
         )
 
@@ -312,15 +369,14 @@ class BybitClient:
     ) -> dict[str, Any]:
         normalized_qty = self.normalize_order_qty(category, symbol, qty)
         normalized_price = self.normalize_price(category, symbol, price, side)
-        return self._request(
-            self.http.place_order,
-            category=category,
-            symbol=symbol,
-            side=side,
+        return self._place_order(
+            category,
+            symbol,
+            side,
+            reduce_only,
             orderType="Limit",
             qty=_decimal_to_string(normalized_qty),
             price=_decimal_to_string(normalized_price),
-            reduceOnly=reduce_only,
             timeInForce="PostOnly" if post_only else "GTC",
         )
 
