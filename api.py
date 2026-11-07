@@ -132,6 +132,18 @@ class BybitClient:
                 return float(entry.get("walletBalance", 0.0))
         return 0.0
 
+    def get_available_balance(self, account_type: str = "UNIFIED") -> Optional[float]:
+        """Margin free for new orders (wallet minus margin held by positions and open
+        orders), or None when the account type does not report it."""
+        result = self._request(self.http.get_wallet_balance, accountType=account_type)
+        balances = result.get("result", {}).get("list", [])
+        if not balances:
+            return None
+        value = balances[0].get("totalAvailableBalance")
+        if value in (None, ""):
+            return None
+        return float(value)
+
     def get_positions(self, category: str, symbol: Optional[str] = None) -> list[dict[str, Any]]:
         kwargs: Dict[str, Any] = {"category": category}
         if symbol:

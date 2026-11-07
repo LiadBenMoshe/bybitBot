@@ -253,20 +253,30 @@ class TraderEngine:
                     continue
                 if not event.confirm:
                     continue
-                self._update_history(event.symbol, event)
-                self._mark_to_market(event.symbol, event.close)
-                self._evaluate_risk_exits(event.symbol, event)
-                self._reconcile_pending_entry(event.symbol, event)
-                frame = self.market_history[event.symbol]
-                if len(frame) < 50:
-                    continue
-                signal = self.strategy.generate_signal(event.symbol, frame)
-                self._process_signal(signal)
+                try:
+                    self._handle_closed_bar(event)
+                except Exception as exc:
+                    # One failed bar (e.g. an exchange rejection) is logged and the loop
+                    # keeps running: stopping here would abandon stop-loss management
+                    # on every open position.
+                    self.last_error = str(exc)
+                    self.logger.exception("Bar for %s failed, loop continues: %s", event.symbol, exc)
         except Exception as exc:
             self.last_error = str(exc)
             self.status = "Stopped"
             self.logger.exception("Trader loop crashed: %s", exc)
             self.market_data.stop()
+
+    def _handle_closed_bar(self, event: Any) -> None:
+        self._update_history(event.symbol, event)
+        self._mark_to_market(event.symbol, event.close)
+        self._evaluate_risk_exits(event.symbol, event)
+        self._reconcile_pending_entry(event.symbol, event)
+        frame = self.market_history[event.symbol]
+        if len(frame) < 50:
+            return
+        signal = self.strategy.generate_signal(event.symbol, frame)
+        self._process_signal(signal)
 
     def _update_history(self, symbol: str, event: Any) -> None:
         frame = self.market_history.get(symbol, pd.DataFrame())
@@ -305,6 +315,37 @@ class TraderEngine:
                 max_notional_qty,
             )
         return round(min(risk_based_qty, max_notional_qty), 6)
+
+    # Headroom for the taker fee and Bybit's own initial-margin rounding.
+    MARGIN_SAFETY = 0.95
+
+    def _fit_to_available_margin(self, symbol: str, price: float, qty: float) -> float:
+        """Shrink a live entry to what the account's free margin can open.
+
+        Sizing works from the wallet balance, which ignores margin already held by
+        other positions and resting orders; without this the exchange rejects the
+        order with 110007 (insufficient available balance).
+        """
+        if self.settings.paper_trading or price <= 0:
+            return qty
+        try:
+            available = self.client.get_available_balance()
+        except Exception as exc:
+            self.logger.warning("Available-margin check failed for %s, keeping qty: %s", symbol, exc)
+            return qty
+        if available is None:
+            return qty
+        max_qty = available * max(self.settings.leverage, 1) * self.MARGIN_SAFETY / price
+        if qty > max_qty:
+            self.logger.warning(
+                "Entry for %s shrunk to free margin: wanted %.6f, %.2f USDT available allows %.6f.",
+                symbol,
+                qty,
+                available,
+                max_qty,
+            )
+            return max(max_qty, 0.0)
+        return qty
 
     # ------------------------------------------------------------------
     # signal handling
@@ -421,6 +462,7 @@ class TraderEngine:
         normalized_qty = qty
         if not self.settings.paper_trading:
             try:
+                qty = self._fit_to_available_margin(symbol, limit_price, qty)
                 normalized_qty = self.client.normalize_order_qty(self.settings.category, symbol, qty)
                 response = self.client.place_limit_order(
                     category=self.settings.category,
@@ -551,13 +593,21 @@ class TraderEngine:
         order_id: Optional[str] = None
         normalized_qty = qty
         if not self.settings.paper_trading and not is_maker:
-            normalized_qty = self.client.normalize_order_qty(self.settings.category, symbol, qty)
-            response = self.client.place_market_order(
-                category=self.settings.category,
-                symbol=symbol,
-                side="Buy" if side == "long" else "Sell",
-                qty=normalized_qty,
-            )
+            try:
+                qty = self._fit_to_available_margin(symbol, price, qty)
+                normalized_qty = self.client.normalize_order_qty(self.settings.category, symbol, qty)
+                response = self.client.place_market_order(
+                    category=self.settings.category,
+                    symbol=symbol,
+                    side="Buy" if side == "long" else "Sell",
+                    qty=normalized_qty,
+                )
+            except Exception as exc:
+                # A rejected entry means no position; it must not take the loop (and
+                # the stop management of every other open position) down with it.
+                self.entries_missed += 1
+                self.logger.warning("Market entry rejected for %s: %s", symbol, exc)
+                return
             order_id = response.get("result", {}).get("orderId")
         entry_cost = self.cost.with_entry_style(is_maker)
         entry_fee = entry_cost.entry_fee(price * normalized_qty)
